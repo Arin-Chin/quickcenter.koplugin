@@ -6,7 +6,7 @@
 
 ---
 
-## 📖 概述 / Overview
+## 📖 Overview
 
 QuickCenter is a standard KOReader **plugin** migrated from the patch
 `koreader/patches/2-quickcenter.lua` (kept in this repository's history for reference).
@@ -21,7 +21,7 @@ plugin is **enabled**, and it never writes to `_G`.
 
 <img src="pictures/1.QCpreview.png" alt="QuickCenter preview" width="400" />
 
-### 快速安装 / Quick install
+### 📦 Quick install
 
 | Step | Action |
 | :--- | :--- |
@@ -45,7 +45,7 @@ plugin is **enabled**, and it never writes to `_G`.
 
 ---
 
-## 🚀 核心功能 / Core Features
+## 🚀 Core Features
 
 ### 1. ⚡ Quick Actions
 
@@ -135,7 +135,7 @@ preview and one-tap reset.
 
 ---
 
-## 🔧 支持 / Support
+## 🔧 Support
 
 | Entry | Location |
 | :--- | :--- |
@@ -160,7 +160,7 @@ names is a silent no-op while disabled.
 
 ---
 
-## 📁 文件结构 / File Structure
+## 📁 File Structure
 
 ```
 QuickCenter.koplugin/            # repository root == plugin root
@@ -192,7 +192,7 @@ QuickCenter.koplugin/            # repository root == plugin root
 
 ---
 
-## ⚙️ 配置 / Configuration
+## ⚙️ Configuration
 
 All settings live in `koreader/settings/quickcenter.lua` (auto-generated on first run;
 an existing file from the patch era is reused as-is — no migration needed).
@@ -207,7 +207,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ---
 
-## 🌐 国际化 / Internationalization
+## 🌐 Internationalization
 
 | Item | Description |
 | :--- | :--- |
@@ -217,7 +217,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ---
 
-## 📦 更新 / Changelog
+## 📦 Changelog
 
 | Date | Version | Notes |
 | :--- | :--- | :--- |
@@ -226,7 +226,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ---
 
-## 🔌 兼容性 / Compatibility
+## 🔌 Compatibility
 
 | Item | Requirement |
 | :--- | :--- |
@@ -238,18 +238,10 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ---
 
-## 🧑💻 开发者信息 / Developer Info
+## Developer Info
 
 | Item | Value |
 | :--- | :--- |
 | Author | [Arin-Chin](https://github.com/Arin-Chin) |
 | License | AGPL-3.0 — see [gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html) |
-| Docs convention | This file and `README.zh_CN.md` are kept in strict correspondence (same sections/tables/rows; identifiers, paths and screenshots byte-identical) |
 
-Lint & tests:
-
-```bash
-luacheck .                                   # static checks (luarocks install luacheck)
-busted spec/qc_config_spec.lua               # unit tests (busted)
-node spec/run_spec.js                        # unit tests (Node + fengari, no install of busted)
-```

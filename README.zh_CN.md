@@ -18,7 +18,7 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 
 <img src="pictures/1.QCpreview.png" alt="QuickCenter 预览" width="400" />
 
-### 快速安装
+### 📦 快速安装
 
 | 步骤 | 操作 |
 | :--- | :--- |
@@ -229,12 +229,4 @@ QuickCenter.koplugin/            # 仓库根 == 插件根
 | :--- | :--- |
 | 作者 | [Arin-Chin](https://github.com/Arin-Chin) |
 | 许可协议 | AGPL-3.0 —— 见 [gnu.org/licenses/agpl-3.0.zh.html](https://www.gnu.org/licenses/agpl-3.0.zh.html) |
-| 文档约定 | 本文件与 `README.md` 严格对位（同章节 / 同表 / 同行；标识符、路径与截图引用逐字节一致） |
 
-Lint 与测试：
-
-```bash
-luacheck .                                   # 静态检查（luarocks install luacheck）
-busted spec/qc_config_spec.lua               # 单元测试（busted）
-node spec/run_spec.js                        # 单元测试（Node + fengari，免装 busted）
-```
