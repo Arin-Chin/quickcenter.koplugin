@@ -240,8 +240,5 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ## Developer Info
 
-| Item | Value |
-| :--- | :--- |
-| Author | [Arin-Chin](https://github.com/Arin-Chin) |
-| License | AGPL-3.0 — see [gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html) |
-
+- **Author**: [Arin-Chin](https://github.com/Arin-Chin)
+- **License**: AGPL-3.0 — see [gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html)

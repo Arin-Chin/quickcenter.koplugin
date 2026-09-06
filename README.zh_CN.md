@@ -223,10 +223,7 @@ QuickCenter.koplugin/            # 仓库根 == 插件根
 
 ---
 
-## 🧑💻 开发者信息
+## 开发者信息
 
-| 项目 | 值 |
-| :--- | :--- |
-| 作者 | [Arin-Chin](https://github.com/Arin-Chin) |
-| 许可协议 | AGPL-3.0 —— 见 [gnu.org/licenses/agpl-3.0.zh.html](https://www.gnu.org/licenses/agpl-3.0.zh.html) |
-
+- **作者**: [Arin-Chin](https://github.com/Arin-Chin)
+- **许可协议**: AGPL-3.0 —— 见 [gnu.org/licenses/agpl-3.0.zh.html](https://www.gnu.org/licenses/agpl-3.0.zh.html)
