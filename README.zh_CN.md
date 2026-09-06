@@ -1,228 +1,134 @@
-# QuickCenter — KOReader 快捷操作与控制中心补丁
+# QuickCenter.koplugin
 
-> **QuickCenter：快捷操作 + 控制中心 —— 一个轻量、可自定义、支持手势的快捷中枢，单文件即插即用。**
+**QuickCenter（快捷中心）—— KOReader 快捷操作 + 控制中心插件。**
 
-> **作者**：[Arin-Chin](https://github.com/Arin-Chin) | **许可协议**：AGPL-3.0 | **兼容性**：KOReader（LuaJIT）
+由旧补丁 `koreader/patches/2-quickcenter.lua`（旧版文件保留在本仓库历史中，供对照）
+迁移并重构而来的标准 KOReader 插件，功能与原补丁完全一致：
 
----
+- **快捷操作（Quick Actions）**：5 种动作类型 + **菜单录制器**（把任意菜单操作路径录制成可复用动作）
+- **控制中心面板**：作为独立菜单标签页呈现，含前光/色温滑杆与外观设置（形状、背景、按钮尺寸、文字标签等）
+- **自定义图标与图标选择器**：Nerd Font 字形、系统图标、图标文件；**系统图标替换**
+- **UI 字体切换**：常规/粗体/等宽三类字体族整体替换
+- **Dispatcher 手势动作** 与 **多套配置方案保存/恢复**
 
-## 📖 概述
+- 作者：[Arin-Chin](https://github.com/Arin-Chin)
+- 许可证：AGPL-3.0（与 KOReader 一致）
+- 版本：1.1.0（插件形态 + 模块化重构）
 
-QuickCenter 是一个独立的 KOReader **补丁**（单个 `.lua` 文件，放入 `koreader/patches/` 即可），将两大核心功能合为一体：
+## 安装
 
-| 功能 | 说明 |
-| :--- | :--- |
-| ⚡ **快捷操作** | 自定义动作：录制、编辑、管理常用操作，通过快捷操作菜单或手势一键运行 |
-| 🎛️ **控制中心** | 一键操作面板及其全部按钮设置：布局、形状、滑块、过滤与手势行为 |
+1. 把本仓库内容复制到 KOReader 插件目录（仓库根即插件本体）：
 
-<img src="pictures/1.QCpreview.png" alt="QuickCenter 预览" width="400" />
+   ```bash
+   git clone https://github.com/Arin-Chin/QuickCenter.koplugin.git
+   cp -r QuickCenter.koplugin/* <koreader>/plugins/quickcenter.koplugin/
+   ```
 
-> 💡 **灵感来源**：
-> - [kopatches](https://github.com/gytwo/kopatches)
-> - [quickui.koplugin](https://github.com/gytwo/quickui.koplugin)
-> - [simpleui.koplugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)
-> - [KOReader.patches](https://github.com/joshuacant/KOReader.patches)
+   设备上最终结构：
 
----
+   ```
+   <koreader>/plugins/quickcenter.koplugin/
+   ├── main.lua
+   ├── qc_config.lua
+   ├── qc_icons.lua
+   ├── qc_scan.lua
+   ├── qc_uifont.lua
+   └── _meta.lua
+   ```
 
-## 🚀 核心功能
+2. 启动 KOReader → **工具（齿轮）→ 插件管理 → User plugins**，确认 `QuickCenter`
+   处于启用状态（默认启用）。
+3. 重启 KOReader 使插件生效。
 
-### 1. ⚡ 快捷操作
+> 卸载：在插件管理器中禁用（或删除）该插件后重启即可。
+> 配置 `koreader/settings/quickcenter.lua` 会被保留，重新启用后继续沿用；
+> 不需要时可手动删除（插件管理对话框也提供「删除设置」入口）。
 
-创建、编辑和管理你最常用的操作，通过快捷操作菜单或绑定手势随时运行。
-
-| 功能 | 说明 |
-| :--- | :--- |
-| **自定义动作** | 5 种类型：文件夹、收藏、插件、系统动作（Dispatcher）、**录制的菜单动作** |
-| **菜单录制** | 将任意菜单路径录制为可复用的快捷操作；录制后可在编辑时自定义其界面（视图） |
-| **编辑快捷操作** | 新增 / 重命名 / 删除动作；已有自定义操作归入 **已有操作** 子菜单；通过 **添加到快捷操作菜单** 勾选为快捷方式 |
-| **快捷操作菜单** | 管理已添加的快捷操作（勾选/取消勾选以移除）；手势可唤出无标题栏的运行列表 |
-
-<table>
-  <tr>
-    <td><img src="pictures/02-quick-actions-menu.png" alt="快捷操作菜单" width="400" /></td>
-    <td><img src="pictures/03-edit-quick-actions.png" alt="编辑快捷操作" width="400" /></td>
-  </tr>
-</table>
-
-<table>
-  <tr>
-    <td><img src="pictures/04-shortcut-menu.png" alt="快捷操作菜单" width="400" /></td>
-    <td><img src="pictures/05-shortcut-menu-gesture.png" alt="手势呼出快捷操作菜单" width="400" /></td>
-  </tr>
-</table>
-
-### 2. 🎛️ 控制中心
-
-注入顶部菜单栏首个标签页的可自定义操作面板（文件管理器与阅读器通用），以及它的全部按钮相关设置。
-
-| 设置项 | 选项 / 说明 |
-| :--- | :--- |
-| **内置动作** | Wi-Fi、夜间模式、旋转、截屏、继续阅读、搜索、重启、退出、电源、HTTP 服务器、字体列表、阅读统计等 |
-| **排列按钮** | 在 QuickCenter 样式框中以 ▲ / ▼ 调整面板按钮顺序（灰底标题栏、返回导航） |
-| **编辑按钮** | 以复选框方式添加 / 移除面板按钮（QuickCenter 样式框，含返回导航） |
-| **按钮布局** | 自动布局（按面板宽度流动排列）或自定义固定网格（**行数 × 每行按钮数**） |
-| **界面过滤** | 按上下文显示 / 隐藏动作（文件管理器 / 阅读器 / 通用） |
-| **手势行为** | 长按按钮编辑 · 长按面板打开设置 |
-| **按钮形状** | 圆形 / 圆角方形 / 无边框 |
-| **按钮背景** | 透明 / 实色 / 浅灰 |
-| **滑块样式** | 线条 / 分段按钮 |
-| **按钮大小** | 60% ~ 150%（步进 5%） |
-| **标签大小** | 50% ~ 200%（步进 10%） |
-| **显示标签** | 开关 |
-| **前光 / 色温滑块** | 支持数值显示与 Min / Max 快捷键 |
-
-<img src="pictures/06-control-center-panel.png" alt="控制中心面板" width="400" />
-
-<img src="pictures/07-control-center-menu.png" alt="控制中心菜单" width="400" />
-
-### 3. ⚙️ 设置
-
-`工具 → QuickCenter` 打开设置菜单：
-
-| 功能 | 说明 |
-| :--- | :--- |
-| **启用快捷中心** | 启用 / 停用面板标签页（需重启生效） |
-| **配置管理** | 命名预设：**保存配置** · **编辑配置** · **重设配置** |
-| **外观设置** | 面板图标 · 系统图标替换 · UI 字体切换 |
-
-#### 配置管理
-
-| 功能 | 说明 |
-| :--- | :--- |
-| **保存配置** | 将当前配置保存为**命名预设** |
-| **编辑配置** | 浏览已保存的预设：**长按以当前配置覆盖**，或进入子菜单进行更新 / 重命名 / 删除 |
-| **重设配置** | 恢复出厂默认值 |
-
-> 预设可随时保存、覆盖和恢复——方便在阅读 / 夜间 / 出行等场景间快速切换。
-
-<img src="pictures/08-settings-menu.png" alt="设置菜单" width="400" />
-
-<img src="pictures/09-config-management.png" alt="配置管理" width="400" />
-
-#### 🖼️ 图标选择器
-
-| 来源 | 说明 |
-| :--- | :--- |
-| **Nerd Font** | 自动扫描符号字体字形，支持码位搜索 |
-| **SVG / PNG 文件** | 浏览 `koreader/icons/` 与内置图标目录，支持名称筛选 |
-| **系统图标替换** | 替换 KOReader 内置图标（网格预览、批量应用 / 重置） |
-
-#### 🔤 UI 字体切换
-
-从已安装字体中替换 KOReader 的 UI 字体（常规 / 粗体 / 等宽），支持实时预览与一键重置。
-
----
-
-## 🔧 手势 / 快捷支持
-
-在 KOReader 手势管理中为以下 Dispatcher 动作绑定任意手势：
-
-| 动作标题 | Dispatcher 动作键 | 说明 |
-| :--- | :--- | :--- |
-| `QuickCenter：控制中心面板` | `quick_actions_panel` | 打开控制中心面板标签页 |
-| `QuickCenter：快捷中心设置` | `qa_settings_action` | 打开 QuickCenter 设置 |
-| `QuickCenter：快捷操作菜单` | `qa_shortcuts_menu` | 打开快捷操作运行列表（无标题栏） |
-
-> 手势绑定在重启后依然有效——补丁在退出时会刷新设置，确保会话中的绑定被持久化。
-
----
-
-## 📦 安装
-
-1. 将 `2-quickcenter.lua` 复制到 KOReader 的 `patches` 目录：`koreader/patches/`
-2. **移除 patches 目录中旧的 `2-quickactions.lua`**（两者会冲突）
-3. *（可选）* 将 `quickcenter.lua` 复制到 `koreader/settings/quickcenter.lua` —— 内含现成设置（自定义动作、按钮覆盖等）。不复制则首次运行自动生成默认配置
-4. 重启 KOReader
-
-> **从 `2-quickactions.lua` 升级**：将 `koreader/settings/quickactions.lua` 重命名为 `quickcenter.lua`，即可保留全部自定义动作与设置。
-
-**卸载**：删除补丁文件；如需清理，可同时删除 `koreader/settings/quickcenter.lua`。
-
----
-
-## 📁 文件结构
+## 目录结构
 
 ```
-QuickCenter/
-├── 2-quickcenter.lua   # 补丁本体（单文件，即插即用）
-├── quickcenter.lua     # 配置文件（可选，放 koreader/settings/）
-├── README.md           # 文档（英文）
-├── README.zh_CN.md     # 文档（简体中文）
-└── pictures/           # 截图
+├── main.lua          入口/骨架：插件类与生命周期（registerToMainMenu/addToMainMenu）、
+│                     动作注册表与内置动作、面板与对话框主体、TouchMenu 等补丁安装
+├── qc_config.lua     配置模块（叶子，可独立单测）：默认值/序列化/原子保存/加载/便捷访问器
+├── qc_scan.lua       插件/补丁扫描模块（叶子）：PluginScan、TOUCHMENU_STUB、菜单项树搜索
+├── qc_uifont.lua     UI 字体切换模块（叶子）：字体族整体替换、选择对话框、重启确认
+├── qc_icons.lua      图标模块（叶子）：Nerd Font、图标缓存、文件/系统图标浏览器与选择器
+├── spec/             busted 风格的单元测试（qc_config）+ 免安装 runner
+├── _meta.lua         插件元数据（禁用时仍可在插件管理器中显示）
+└── .luacheckrc       luacheck 配置
 ```
 
-| 文件 | 用途 |
-| :--- | :--- |
-| `2-quickcenter.lua` | 快捷操作 + 控制中心 + 配置管理 + 图标 / 字体工具 |
-| `quickcenter.lua` | 现成设置文件 —— 复制到 `koreader/settings/quickcenter.lua` |
-| `README.md` | 文档（英文） |
-| `README.zh_CN.md` | 文档（简体中文） |
+分层原则：`qc_*` 四个叶子模块只依赖 KOReader 核心 API 与 `qc_config`，在插件加载时
+`require` 一次并缓存；`main.lua` 保留与原补丁一一对应的正文（便于对照上游），跨文件
+引用通过顶部「子模块装配」别名块 + `QC` 桥接表接入——无循环依赖、不写 `_G`。
 
----
+## 与原补丁的差异
 
-## ⚙️ 配置
+| 项目 | 补丁版 | 本插件 |
+| --- | --- | --- |
+| 加载方式 | 启动时自动加载，无生命周期 | PluginLoader 标准加载：`main.lua` 仅在插件「启用」时被 dofile，禁用即完全不加载 |
+| 全局污染 | 18 个函数/表写入 `_G` | 全部收敛为模块局部：`QC` 桥接表 + `qc_*` 子模块导出，不写 `_G` |
+| 代码形态 | 单文件 ~5700 行 | 入口 + 4 个叶子模块（逻辑逐行保留，仅结构性搬移） |
+| 插件类 | 无 | `WidgetContainer:extend` + `init()`/`addToMainMenu()`/`onClose()` |
+| 菜单入口 | 注入工具菜单并改 `*_menu_order` 顺序表 | 标准 `registerToMainMenu` + `addToMainMenu`（归入 **More tools** 子菜单，由 KOReader 原生管理） |
+| 配置文件 | `settings/quickcenter.lua` | **不变**：路径、读写格式与字段完全一致 |
+| 手势 | 3 个动作 + 每次 execute 前重注册的兜底包装 | 动作不变；删除 `Dispatcher.execute` 全局重写（见下） |
 
-所有设置保存在 `koreader/settings/quickcenter.lua`（首次运行自动生成）。
+## 本次重构的修复项
 
-主要配置分组：
+1. **字体补丁套娃**：原 `applyUIFontChanges()` 每次改字体都会给 `menu/touchmenu.updateItems`
+   再包一层，包装链无限增长且捕获旧字体；现改为每个模块只包装一次（`_qa_font_patch_done`
+   守卫），包装体每次执行时读取**当前**字体覆盖。
+2. **模块化拆分**：叶子模块各自拥有独立局部变量预算（不再逼近 Lua 200 活跃局部变量上限），
+   `main.lua` 降至约 4100 行。
+3. **菜单入口标准化**：不再补丁 `FileManagerMenuOrder/ReaderMenuOrder` 与 `menu_items`，
+   改用 `addToMainMenu` + `sorting_hint = "more_tools"`（否则 MenuSorter 会给条目加
+   `NEW:` 前缀并丢进第一个标签页）。面板标签注入因无官方 API 而保留。
+4. **lint 与单测**：`.luacheckrc`（luajit 标准）已就绪；`spec/qc_config_spec.lua` 覆盖
+   默认值生成、跨重启持久化往返、序列化转义、损坏配置自动备份。
 
-| 分组 | 键名 | 说明 |
-| :--- | :--- | :--- |
-| 面板 | `qa_enabled`、`qa_slots`、`qa_*` | 面板开关、按钮顺序、形状、大小、标签、滑块 |
-| 布局 | `qa_layout_*` | 自定义按钮网格（开关 / 行数 / 每行数） |
-| 快捷方式 | `qa_shortcuts` | 已加入快捷操作菜单的动作 |
-| 配置 | `saved_configs` | 命名配置预设 |
-| 外观 | `qa_tab_icon`、`qa_icon_overrides`、`ui_font_overrides` | 面板图标、系统图标替换、UI 字体 |
+另：删除每次 `Dispatcher:execute` 都重注册动作的全局包装（避免与第三方插件对同一方法的
+包装冲突；插件加载时机已保证注册），并让配置序列化的键排序使用显式比较器（数字键在前，
+输出确定，且兼容 Lua 5.3+ 的 `table.sort` 语义）。
 
----
+## 使用入口
 
-## 🔌 兼容性与依赖
+- **菜单入口**：主菜单 → 工具（齿轮）标签 → **More tools** → **快捷中心** ——
+  打开完整设置对话框（快捷操作、面板布局、图标选择、系统图标替换、UI 字体、快捷方式等）。
+- **控制中心面板**：菜单顶部出现带 ⭐（可配置图标）的「控制中心」标签页；长按面板空白处
+  或点“设置”按钮打开快捷中心设置；面板按钮支持点击/长按编辑（同补丁行为）。
+- **手势动作**（工具 → 手势管理 绑定；绑定存于 `settings/dispatcher.lua`，重启保留）：
+  - `quick_actions_panel` —— 打开控制中心面板
+  - `qa_settings_action` —— 打开快捷中心设置
+  - `qa_shortcuts_menu` —— 打开快捷操作菜单
+- **配置文件**：`koreader/settings/quickcenter.lua`（缺失自动生成；已有配置直接复用）。
+  图标可放在 `koreader/icons/` 等目录。
 
-| 项目 | 要求 |
-| :--- | :--- |
-| **KOReader** | 任意较新构建（LuaJIT）；已在 v2026.07 验证 |
-| **设备** | 前光 / 色温滑块需设备支持 |
-| **图标** | Nerd Font 功能需要 Nerd Font 符号字体 |
+## 禁用/启用行为
 
----
+- 禁用插件并重启后：菜单入口、控制中心标签、手势动作、字体/图标补丁全部不再生效
+  （都只在插件 `main.lua` 被加载时注入）。
+- 说明：注入为 KOReader 界面模块的方法级包装，插件机制不支持运行期解包，请修改后重启。
+  手势若仍引用三个动作名，禁用后执行会静默无效果，不影响其它功能。
 
-## 📝 更新日志
+## 开发：lint 与测试
 
-### 2026-08-24 — Bug 修复：图标选择器缓存回归
+```bash
+# 静态检查（需 luarocks install luacheck）
+cd quickcenter.koplugin && luacheck .
 
-修复重构引入的崩溃：`showIconPicker` 的缓存写入误改为数组表，而读取端仍按字段名访问，导致第二次打开图标选择器时 `icons_list` 为 nil，触发 `attempt to get length of local 'display_list' (a nil value)` 崩溃。
+# 单元测试：方式 A —— 真 busted
+busted quickcenter.koplugin/spec/qc_config_spec.lua
 
-- 缓存恢复为字段名字段表，读写一致；读取端增加完整性校验（尺寸 + `icons_list` 存在）
-- `getDisplayList` 增加 `icons_list or {}` 防御，杜绝同类回归导致崩溃
-- 界面选择对话框（`showViewPickerDialog`）增加 `tap_close_callback`：点击外部 / 实体返回键关闭时同样重建编辑框，避免对话框状态丢失导致返回后界面错乱
+# 方式 B —— 免安装 runner（需 Node + fengari：cd spec && npm i fengari）
+node quickcenter.koplugin/spec/run_spec.js
+```
 
-### 2026-08-24 — Bug 修复：视图选择器未关闭 + 插件返回崩溃
+测试在“内存文件系统”上运行（runner 会 stub `io/os/logger/datastorage/json`），
+不会读写真实磁盘。
 
-- `showViewPickerDialog` 中 `local view_dialog` 声明在按钮回调闭包之后，闭包内的 `UIManager:close(view_dialog)` 实际引用全局 nil，对话框从未从窗口栈移除 —— 保存后残留的“选择界面”重新露出。已改为前向声明
-- 插件/补丁子菜单的 `showPluginSubMenu` / `showPluginList` 互相引用却无前向声明，点“返回”会调用全局 nil 崩溃。已补前向声明
+## 版本兼容性提示
 
-### 2026-08-24 — Bug 修复：Dispatcher 缓存崩溃
-
-修复“新建操作 → 系统动作”崩溃：`getDispatcherSettingsList` 曾把缓存挂在函数名上（`getDispatcherSettingsList._cache`），LuaJIT 不支持对函数值索引，报 `attempt to index upvalue ... (a function value)`。已改为独立局部变量缓存。
-
----
-
-## 📝 更新日志（重构记录）
-
-### 2026-08-24 — 深度重构与优化
-
-单文件补丁全面重构：体积更小、更健壮、墨水屏运行更流畅。**无功能与配置格式变更** —— 现有 `koreader/settings/quickcenter.lua` 可直接沿用。
-
-- **体积** — `2-quickcenter.lua` 从约 314 KB / 8189 行减至约 260 KB / 5739 行（−17%）：清除死代码（未使用的 require、`_batch_depth`、未调用的 `PluginScan.exists`），合并重复实现（动作执行器、菜单字体补丁、动作列表构建、重启确认框），提取公共辅助函数（`menuSubTable`、`findMenuItem`、`askRestart`、`moveSlot`、`showViewPickerDialog` 等）
-- **性能** — Dispatcher 设置表（`settingsList`）由每次按动作重复扫描改为解析一次并缓存（O(n²) → O(n)）；Nerd Font 字形扫描仅查找一次 symbols 字体面（约 900 → 1 次查找）；滑块按钮高度惰性测量，不再每次构建面板时创建测量用控件
-- **健壮性** — 修复 3 处潜在 bug：`clearFileIconsCache` 清空的是错误的（全局）缓存表、`TOUCHMENU_STUB` 在声明前被引用（解析为全局 nil）、`replayPath` / `_stopPicking` / `injectPanelTab` 在 `local` 声明之前被闭包调用；动作执行包裹 `pcall`，单个动作异常不会导致 KOReader 崩溃
-- **可维护性** — 顶层局部变量从 202 降至 195（安全低于 Lua 200 槽上限）；统一命名、简化深嵌套、关键逻辑补充中文注释
-
----
-
-## 📄 许可协议
-
-本项目基于 **GNU Affero General Public License v3.0（AGPL-3.0）** 发布。
-
-详见：[https://www.gnu.org/licenses/agpl-3.0.zh.html](https://www.gnu.org/licenses/agpl-3.0.zh.html)
+插件深度依赖 KOReader 内部结构（TouchMenu 面板构建、标签注入、字体替换等），
+兼容范围与原补丁相同；升级 KOReader 后若面板/菜单表现异常，请以 KOReader 实际行为
+为准。面板相关补丁集中在 `main.lua` 尾部（可 grep `_qs_patched`）。

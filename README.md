@@ -1,228 +1,162 @@
-# QuickCenter — Quick Actions & Control Center Patch for KOReader
+# QuickCenter.koplugin
 
-> **QuickCenter: a fast, configurable and gesture-friendly shortcut hub — Quick Actions + Control Center in a single drop-in patch.**
+**QuickCenter — Quick Actions + Control Center for KOReader.**
 
-> **Author**: [Arin-Chin](https://github.com/Arin-Chin) | **License**: AGPL-3.0 | **Compatible**: KOReader (LuaJIT)
+A standard KOReader plugin migrated and refactored from the older patch
+(`koreader/patches/2-quickcenter.lua`, kept in this repository's history for reference).
+Features are fully preserved:
 
----
+- **Quick Actions (快捷操作)** with 5 action types, plus a menu **recorder** that
+  captures any menu navigation as a reusable action
+- **Control Center panel** rendered as its own top-level menu tab with frontlight /
+  warmth sliders, layout & appearance options (shape, background, button size, labels…)
+- **Custom icons & icon picker**: Nerd Font glyphs, system icons and icon files;
+  **system icon replacement**
+- **UI font switching** (regular / bold / mono font families, whole-UI replacement)
+- **Dispatcher gesture actions** and **multi-profile configuration management**
 
-## 📖 Overview
+- Author: [Arin-Chin](https://github.com/Arin-Chin)
+- License: AGPL-3.0 (same as KOReader)
+- Version: 1.1.0 (plugin form, modular layout)
 
-QuickCenter is a standalone KOReader **patch** (a single `.lua` file placed in `koreader/patches/`) that combines two core experiences:
+## Installation
 
-| Feature | Description |
-| :--- | :--- |
-| ⚡ **Quick Actions** | Custom actions — record, edit and manage the actions you use most; run them from the shortcut menu or via gesture |
-| 🎛️ **Control Center** | A one-tap action panel plus everything about its buttons: layout, shapes, sliders, filters and gesture behaviors |
+1. Copy the contents of this repository (or just the whole folder) into the KOReader
+   plugin directory:
 
-<img src="pictures/1.QCpreview.png" alt="QuickCenter preview" width="400" />
+   ```bash
+   # e.g. clone directly, then symlink/copy
+   git clone https://github.com/Arin-Chin/QuickCenter.koplugin.git
+   cp -r QuickCenter.koplugin/* <koreader>/plugins/quickcenter.koplugin/
+   ```
 
-> 💡 **Inspiration**:
-> - [kopatches](https://github.com/gytwo/kopatches)
-> - [quickui.koplugin](https://github.com/gytwo/quickui.koplugin)
-> - [simpleui.koplugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)
-> - [KOReader.patches](https://github.com/joshuacant/KOReader.patches)
+   Final layout on device:
 
----
+   ```
+   <koreader>/plugins/quickcenter.koplugin/
+   ├── main.lua
+   ├── qc_config.lua
+   ├── qc_icons.lua
+   ├── qc_scan.lua
+   ├── qc_uifont.lua
+   └── _meta.lua
+   ```
 
-## 🚀 Core Features
+2. Start KOReader → **Tools (gear) → Plugin manager → User plugins** and make sure
+   `QuickCenter` is enabled (enabled by default).
+3. Restart KOReader so the plugin gets loaded.
 
-### 1. ⚡ Quick Actions
+> Uninstall: disable (or delete) the plugin in the Plugin manager and restart.
+> Your configuration at `koreader/settings/quickcenter.lua` is kept and reused if you
+> re-enable later; delete it manually if no longer needed (the plugin dialog also offers
+> a "delete settings" action).
 
-Create, edit and manage the actions you use most, then run them from the shortcut menu or via a bound gesture.
-
-| Feature | Description |
-| :--- | :--- |
-| **Custom Actions** | 5 types: folder, collection, plugin, system action (Dispatcher), **recorded menu action** |
-| **Menu Recording** | Record any menu path as a reusable quick action; its interface (view) can be customized later when editing |
-| **Edit Quick Actions** | Add / rename / delete actions; existing custom actions grouped under **Existing Actions (已有操作)**; mark each as a shortcut via **Add to Shortcut Menu** |
-| **Shortcut Menu** | Manage added shortcuts (check/uncheck to remove); a gesture can open the runnable list without a title bar |
-
-<table>
-  <tr>
-    <td><img src="pictures/02-quick-actions-menu.png" alt="Quick Actions menu" width="400" /></td>
-    <td><img src="pictures/03-edit-quick-actions.png" alt="Edit Quick Actions" width="400" /></td>
-  </tr>
-</table>
-
-<table>
-  <tr>
-    <td><img src="pictures/04-shortcut-menu.png" alt="Shortcut menu" width="400" /></td>
-    <td><img src="pictures/05-shortcut-menu-gesture.png" alt="Gesture-launched shortcut menu" width="400" /></td>
-  </tr>
-</table>
-
-### 2. 🎛️ Control Center
-
-A customizable action panel injected as the first tab of the top menu bar (Filemanager & Reader), plus everything about its buttons.
-
-| Setting | Options / Description |
-| :--- | :--- |
-| **Built-in Actions** | Wi-Fi, night mode, rotate, screenshot, continue reading, search, restart, quit, power, HTTP server, font list, reading stats, etc. |
-| **Arrange (排列按钮)** | Reorder panel buttons with ▲ / ▼ in a QuickCenter-style box (gray title bar, back navigation) |
-| **Add Buttons (编辑按钮)** | Add / remove panel buttons with checkboxes (QuickCenter-style box with back navigation) |
-| **Button Layout** | Auto layout (flow by panel width) or a custom fixed grid (**rows × buttons per row**) |
-| **Interface Filter** | Show/hide actions per context (Filemanager / Reader / Common) |
-| **Gesture Behaviors** | Long-press a button to edit · long-press the panel to open settings |
-| **Button Shape** | Round / Rounded Square / Bare |
-| **Button Background** | Transparent / Solid / Light Gray |
-| **Slider Style** | Line / Segmented buttons |
-| **Button Size** | 60% ~ 150% (step 5%) |
-| **Label Size** | 50% ~ 200% (step 10%) |
-| **Show Labels** | Toggle |
-| **Frontlight / Warmth Sliders** | With value display and Min / Max shortcuts |
-
-<img src="pictures/06-control-center-panel.png" alt="Control Center panel" width="400" />
-
-<img src="pictures/07-control-center-menu.png" alt="Control Center menu" width="400" />
-
-### 3. ⚙️ Settings
-
-`Tools → QuickCenter` opens the settings menu:
-
-| Feature | Description |
-| :--- | :--- |
-| **Enable QuickCenter** | Enable / disable the panel tab (restart required) |
-| **Config Management** | Named presets: **Save Config** · **Edit Config** · **Reset Config** |
-| **Appearance** | Panel icon · System icon replace · UI font switch |
-
-#### Config Management
-
-| Function | Description |
-| :--- | :--- |
-| **Save Config** | Save the current configuration as a **named preset** |
-| **Edit Config** | Browse saved presets: **long-press to overwrite** with current settings, or open the submenu for update / rename / delete |
-| **Reset Config** | Restore factory defaults |
-
-> Presets can be saved, overwritten and restored at any time — convenient for switching between reading / night / travel setups.
-
-<img src="pictures/08-settings-menu.png" alt="Settings menu" width="400" />
-
-<img src="pictures/09-config-management.png" alt="Config management" width="400" />
-
-#### 🖼️ Icon Picker
-
-| Source | Description |
-| :--- | :--- |
-| **Nerd Font** | Auto-scanned glyphs from the symbols font with codepoint search |
-| **SVG / PNG Files** | Browse `koreader/icons/` and built-in icon directories, with name filter |
-| **System Icon Replace** | Replace KOReader's built-in icons (grid preview, batch apply / reset) |
-
-#### 🔤 UI Font Switcher
-
-Replace KOReader's UI font (Regular / Bold / Mono) from installed fonts, with a live preview and one-tap reset.
-
----
-
-## 🔧 Gesture / Shortcut Support
-
-Bind any gesture in KOReader's gesture manager to these Dispatcher actions (the on-screen title is localized to your UI language):
-
-| Action | Dispatcher Action Key | Description |
-| :--- | :--- | :--- |
-| Control Center Panel | `quick_actions_panel` | Open the Control Center panel tab |
-| QuickCenter Settings | `qa_settings_action` | Open QuickCenter settings |
-| Shortcut Menu | `qa_shortcuts_menu` | Open the runnable shortcut menu (no title bar) |
-
-> Gesture bindings survive restarts — the patch flushes settings on quit, so bindings made in a session are persisted.
-
----
-
-## 📦 Installation
-
-1. Copy `2-quickcenter.lua` to KOReader's `patches` folder: `koreader/patches/`
-2. **Remove any older `2-quickactions.lua`** from `patches/` (they would conflict)
-3. *(Optional)* Copy `quickcenter.lua` to `koreader/settings/quickcenter.lua` — it contains ready-made settings (custom actions, button overrides, …). If omitted, the file is auto-generated with defaults on first run
-4. Restart KOReader
-
-> **Upgrade from `2-quickactions.lua`**: rename `koreader/settings/quickactions.lua` → `quickcenter.lua` to keep all your existing custom actions and settings.
-
-**Uninstall**: delete the patch file; optionally delete `koreader/settings/quickcenter.lua`.
-
----
-
-## 📁 File Structure
+## Repository layout
 
 ```
-QuickCenter/
-├── 2-quickcenter.lua   # The whole patch (single file, drop-in)
-├── quickcenter.lua     # Settings file (optional, place in koreader/settings/)
-├── README.md           # Documentation (English)
-├── README.zh_CN.md     # Documentation (Simplified Chinese)
-└── pictures/           # Screenshots
+├── main.lua          entry/skeleton: plugin class & lifecycle (registerToMainMenu /
+│                     addToMainMenu), action registry & built-in actions, panels /
+│                     dialogs, TouchMenu & related patch installation
+├── qc_config.lua     configuration leaf module (unit-testable): defaults, serializer,
+│                     atomic save/load, setting accessors
+├── qc_scan.lua       plugin/patch scanner leaf module: PluginScan, TOUCHMENU_STUB,
+│                     menu-item tree search
+├── qc_uifont.lua     UI font switcher leaf module: font-family replacement, picker dialogs
+├── qc_icons.lua      icons leaf module: Nerd Font, icon cache, file/system icon browser
+│                     & picker
+├── spec/             busted-style unit tests (qc_config) + dependency-free runner
+├── _meta.lua         plugin metadata (shown in the Plugin manager even when disabled)
+└── .luacheckrc       luacheck configuration
 ```
 
-| File | Purpose |
-| :--- | :--- |
-| `2-quickcenter.lua` | Quick Actions + Control Center + config management + icon/font tools |
-| `quickcenter.lua` | Ready-made settings file — copy to `koreader/settings/quickcenter.lua` |
-| `README.md` | Documentation (English) |
-| `README.zh_CN.md` | Documentation (Simplified Chinese) |
+Layering: the four `qc_*` leaf modules only depend on KOReader core APIs and on
+`qc_config`; each is `require`d (and cached) once at plugin load. `main.lua` keeps the
+body 1:1 with the original patch so it can be diffed against upstream; cross-file
+references are wired through the "module assembly" alias block and the `QC` bridge table
+at the top — no circular requires, no `_G` pollution.
 
----
+## Differences from the original patch
 
-## ⚙️ Configuration
+| Aspect | Patch (`patches/2-quickcenter.lua`) | This plugin |
+| --- | --- | --- |
+| Loading | Auto-loaded at startup, no lifecycle | Standard PluginLoader: `main.lua` is only `dofile`d while **enabled**; disabling means it is never loaded |
+| Global scope | 18 functions/tables written to `_G` | All moved to module locals: `QC` bridge table + `qc_*` module exports, no `_G` writes |
+| Layout | Single ~5700-line file | Entry + 4 leaf modules (logic kept line-by-line, structural moves only) |
+| Plugin class | none | `WidgetContainer:extend` + `init()` / `addToMainMenu()` / `onClose()` |
+| Menu entry | Injected into the gear menu, patching `*_menu_order` order tables | Standard `registerToMainMenu` + `addToMainMenu` (lands in the *More tools* submenu, managed natively by KOReader) |
+| Config file | `settings/quickcenter.lua` | **Unchanged**: same path, same read/write format & keys |
+| Gestures | 3 Dispatcher actions + a re-register-on-execute fallback wrapper | Same 3 actions; the `Dispatcher.execute` global rewrite is removed (see below) |
 
-All settings are stored in `koreader/settings/quickcenter.lua` (auto-generated on first run).
+## Notable fixes in this rewrite
 
-Key configuration groups:
+1. **Font-patch wrap growth** — the old `applyUIFontChanges()` wrapped
+   `menu/touchmenu.updateItems` once *per font change*, growing an unbounded wrapper
+   chain that captured stale fonts. Now each module is wrapped exactly once
+   (`_qa_font_patch_done` guard) and the wrapper reads the **current** font overrides on
+   every run.
+2. **Modular split** — leaf modules each get their own local-variable budget (no more
+   pressure against Lua's 200-active-locals limit); `main.lua` is ~4100 lines.
+3. **Standard menu integration** — no more patching of `FileManagerMenuOrder` /
+   `ReaderMenuOrder` or `menu_items`; `addToMainMenu` with `sorting_hint = "more_tools"`
+   is used instead (required, otherwise the menu sorter would label the item with a
+   `NEW:` prefix and drop it into the first tab). Panel-tab injection is kept — there is
+   no official API for it.
+4. **Lint + unit tests** — `.luacheckrc` (luajit std) included; `spec/qc_config_spec.lua`
+   covers default-generation, cross-restart persistence round-trip, serializer escaping,
+   and corrupt-config auto-backup.
 
-| Group | Keys | Description |
-| :--- | :--- | :--- |
-| Panel | `qa_enabled`, `qa_slots`, `qa_*` | Panel enable, button order, shape, size, labels, sliders |
-| Layout | `qa_layout_*` | Custom button grid (enabled / rows / per-row) |
-| Shortcuts | `qa_shortcuts` | Actions added to the shortcut menu |
-| Configs | `saved_configs` | Named configuration presets |
-| Appearance | `qa_tab_icon`, `qa_icon_overrides`, `ui_font_overrides` | Panel icon, system icon replacement, UI fonts |
+Additionally: removed the per-`Dispatcher:execute` re-registration wrapper (it clashed
+with third-party wrappers on the same method and was unnecessary given plugin-load
+timing), and made the config serializer's key sort use an explicit comparator
+(numeric keys first — deterministic, and safe under Lua 5.3+ `table.sort` semantics).
 
----
+## Usage
 
-## 🔌 Compatibility & Dependencies
+- **Menu entry**: Main menu → gear/tools tab → **More tools** → **QuickCenter** — opens
+  the full settings dialog (quick actions, panel layout, icon picker, system icon
+  replacement, UI font switching, shortcuts…).
+- **Control Center panel**: a tab (default star icon, configurable) appears at the front
+  of the menu. Hold the empty panel area, or use the "Settings" button, to open the
+  QuickCenter settings; panel buttons support tap / long-press editing as before.
+- **Gesture actions** (bind under gear → Gesture manager; bindings persist in
+  `settings/dispatcher.lua` across restarts):
+  - `quick_actions_panel` — open the Control Center panel
+  - `qa_settings_action` — open QuickCenter settings
+  - `qa_shortcuts_menu` — open the shortcuts menu
+- **Configuration**: `koreader/settings/quickcenter.lua` (auto-generated on first run
+  when missing; existing files are reused as-is). Icons may be placed in
+  `koreader/icons/` or similar directories.
 
-| Item | Requirement |
-| :--- | :--- |
-| **KOReader** | Any recent build (LuaJIT); verified on v2026.07 |
-| **Device** | Frontlight / warmth sliders require device support |
-| **Icons** | Nerd Font feature requires a Nerd Font symbols face |
+## Enable / disable behavior
 
----
+- Disable the plugin and restart: menu entry, panel tab, gesture actions and the
+  font/icon patches are all gone (they are only injected while the plugin's `main.lua`
+  is loaded).
+- Note: these injections are method-level wrappers on KOReader UI modules; the plugin
+  framework does not unwrap them at runtime, so always restart after toggling. If a
+  gesture still references one of the three action names while disabled, executing it is
+  a silent no-op and does not affect anything else.
 
-## 📝 Changelog
+## Development: lint & tests
 
-### 2026-08-24 — Bugfix: icon picker cache regression
+```bash
+# static checks (luarocks install luacheck)
+cd quickcenter.koplugin && luacheck .
 
-Fixed a crash introduced by the refactor: `showIconPicker`'s cache was written as an array table while reads still used named fields, so reopening the icon picker left `icons_list` nil → `attempt to get length of local 'display_list' (a nil value)`.
+# unit tests — option A: real busted
+busted quickcenter.koplugin/spec/qc_config_spec.lua
 
-- Cache restored to a named-field table (write/read consistent); read side now validates integrity (size + `icons_list` present)
-- `getDisplayList` guarded with `icons_list or {}` so the same class of regression can never crash again
-- View-picker dialog (`showViewPickerDialog`) now sets `tap_close_callback`: closing via outside tap / hardware back rebuilds the edit dialog, preventing state loss and UI confusion after backing out
+# option B: dependency-free runner (Node + fengari: cd spec && npm i fengari)
+node quickcenter.koplugin/spec/run_spec.js
+```
 
-### 2026-08-24 — Bugfix: view picker never closed + plugin back crash
+Tests run against an in-memory filesystem (the runner stubs `io/os/logger/datastorage/json`)
+and never touch real disk.
 
-- `showViewPickerDialog`: `local view_dialog` was declared after the button callbacks, so `UIManager:close(view_dialog)` inside the closures resolved to the *global* nil — the dialog was never removed from the window stack and resurfaced after saving. Fixed with a forward declaration.
-- Plugin/patch submenu: `showPluginSubMenu` / `showPluginList` referenced each other without forward declarations, so “Back” called a global nil and crashed. Forward declarations added.
+## Version compatibility
 
-### 2026-08-24 — Bugfix: Dispatcher cache crash
-
-Fixed a crash when picking “System Actions” in New Action: `getDispatcherSettingsList` cached on the function itself (`getDispatcherSettingsList._cache`), but LuaJIT cannot index a function value → `attempt to index upvalue ... (a function value)`. Switched to a dedicated local variable cache.
-
----
-
-## 📝 Changelog (refactor)
-
-### 2026-08-24 — Deep refactor & optimization
-
-Single-file patch restructured for smaller size, higher robustness and smoother e-ink performance. **No functional or config-format changes** — existing `koreader/settings/quickcenter.lua` files keep working as-is.
-
-- **Size** — `2-quickcenter.lua` cut from ~314 KB / 8189 lines to ~260 KB / 5739 lines (−17%): removed dead code (unused requires, `_batch_depth`, unused `PluginScan.exists`), merged duplicated implementations (action executors, menu font patches, action-list builders, restart dialogs), extracted shared helpers (`menuSubTable`, `findMenuItem`, `askRestart`, `moveSlot`, `showViewPickerDialog`, …)
-- **Performance** — Dispatcher settings table (`settingsList`) now parsed once and cached instead of re-scanned per action (O(n²) → O(n)); Nerd Font glyph scan looks up the symbols face once instead of per codepoint (~900 → 1 lookups); slider button height measured lazily instead of per panel build
-- **Robustness** — fixed 3 latent bugs: `clearFileIconsCache` cleared the wrong (global) cache table, `TOUCHMENU_STUB` was referenced before its declaration (resolved to global nil), and `replayPath` / `_stopPicking` / `injectPanelTab` were called from closures bound before their `local` declarations; action execution is now wrapped in `pcall` so a failing action can never crash KOReader
-- **Maintainability** — top-level locals reduced from 202 to 195 (safely under Lua's 200-slot limit); naming unified, deep nesting simplified, key logic documented in Chinese comments
-
----
-
-## 📄 License
-
-This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
-
-See: [https://www.gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html)
+The plugin relies on several KOReader internals (TouchMenu panel construction, tab
+injection, font replacement) that may change between releases; the compatible range
+matches the original patch. After a KOReader upgrade, if the panel or menus misbehave,
+check the corresponding internal modules in the KOReader source. Panel-related patches
+are concentrated at the tail of `main.lua` (grep for `_qs_patched`).

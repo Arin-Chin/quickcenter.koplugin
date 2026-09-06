@@ -1,7 +1,19 @@
--- 2-quickcenter.lua - 快捷中心（Quick Center）for KOReader
--- 快捷操作 + 控制中心集成补丁：菜单录制、5 种动作类型、自定义图标、替换系统图标与 UI 字体
--- 安装：放入 koreader/patches/ 目录（文件名 2- 前缀为 late 加载优先级，勿改）
--- 卸载：删除本文件，同时删除 koreader/settings/quickcenter.lua（可选配置文件）
+-- quickcenter.koplugin/main.lua - 快捷中心（Quick Center）for KOReader
+-- 由 koreader/patches/2-quickcenter.lua 迁移而来的标准插件版，功能与原补丁完全一致：
+-- 快捷操作 + 控制中心集成：菜单录制、5 种动作类型、自定义图标、替换系统图标与 UI 字体。
+--
+-- 作者 Author : ArinChin
+-- 许可证 License : AGPL-3.0（与 KOReader 一致）
+-- 版本 Version : 1.0.0（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
+--
+-- 安装：把整个 quickcenter.koplugin/ 目录放入 koreader/plugins/，在「工具 → 插件管理」
+--       中启用（默认启用）后重启 KOReader。
+-- 卸载：在插件管理器中禁用/删除该插件后重启；配置 koreader/settings/quickcenter.lua
+--       会被保留复用（如不需要可手动删除）。
+-- 兼容：沿用原补丁配置 koreader/settings/quickcenter.lua，读写格式完全不变。
+-- 禁用语义：KOReader 的 PluginLoader 只会在插件「启用」时 dofile 本文件（见
+-- frontend/pluginloader.lua），因此本文件内的全部注入（菜单/面板标签/手势等）
+-- 天然与启用状态绑定，禁用后重启即不产生任何副作用。
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
@@ -23,11 +35,9 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local ImageWidget = require("ui/widget/imagewidget")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local InputContainer = require("ui/widget/container/inputcontainer")
-local InputText = require("ui/widget/inputtext")
 local MultiInputDialog = require("ui/widget/multiinputdialog")
 local Menu = require("ui/widget/menu")
 local PathChooser = require("ui/widget/pathchooser")
@@ -37,10 +47,8 @@ local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
-local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Notification = require("ui/widget/notification")
 local util = require("util")
-local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local Event = require("ui/event")
 local IconWidget = require("ui/widget/iconwidget")
 local FontList = require("fontlist")
@@ -53,190 +61,9 @@ logger.info("[QuickActions] 加载中...")
 local openDispatcherPicker = nil
 local _settings_dialog = nil
 local sub_dialog = nil
-local CONFIG_PATH = nil
-local CONFIG_DATA = nil
-local DEFAULT_CONFIG = nil
-local MAX_SLOTS = 66
 
--- ============================================================
--- ButtonDialog 全局补丁：默认 10 行/页
--- ============================================================
-local _orig_ButtonDialog_new = ButtonDialog.new
-function ButtonDialog.new(_, ...)
-    local args = {...}
-    if type(args[1]) ~= "table" then args = {} else args = args[1] end
-    if args.rows_per_page == nil then args.rows_per_page = 10 end
-    return _orig_ButtonDialog_new(_, args)
-end
-
--- ============================================================
--- 默认配置
--- ============================================================
-DEFAULT_CONFIG = {
-    qa_tab_icon = "star.empty",
-    qa_enabled = true,
-    qa_slots = { "wifi", "night", "rotate", "screenshot", "continue", "fontlist", "restart", "search", "qa_settings", "qa_add_button", "qa_new" },
-    qa_frontlight = true,
-    qa_warmth = true,
-    qa_shape = "round",
-    qa_bg = "flat",
-    qa_labels = false,
-    qa_label_scale_pct = 90,
-    qa_settings_on_hold = true,
-    qa_button_size_pct = 100,
-    custom_list = {},
-    custom = {},
-    builtin_overrides = {},
-    qa_context_filter = true,
-    qa_auto_add_to_panel = true,
-    qa_button_hold_edit = true,
-    qa_slider_show_value = false,
-    qa_slider_style = "line",
-    qa_filter_initialized = false,
-    qa_icon_overrides = {},
-    ui_font_overrides = {},
-    qa_shortcuts = {},
-    qa_layout_enabled = false,
-    qa_layout_rows = 2,
-    qa_layout_cols = 4,
-    saved_configs = {},
-    version = 1,
-}
-
--- ============================================================
--- 配置读写
--- ============================================================
-local function getConfigPath()
-    if CONFIG_PATH then return CONFIG_PATH end
-    local ok, DataStorage = pcall(require, "datastorage")
-    CONFIG_PATH = ok and DataStorage and DataStorage:getSettingsDir() .. "/quickcenter.lua" or "quickcenter.lua"
-    return CONFIG_PATH
-end
-
--- 序列化为 Lua 表字面量（转义反斜杠/引号/换行，避免写出非法配置）
-local function serializeTable(t, indent)
-    indent = indent or ""
-    local lines, keys = { "{\n" }, {}
-    for k in pairs(t) do keys[#keys + 1] = k end
-    table.sort(keys)
-    for i, k in ipairs(keys) do
-        local v = t[k]
-        local ks = type(k) == "string" and string.format('["%s"]', k) or string.format("[%s]", tostring(k))
-        local vv
-        if type(v) == "table" then
-            vv = serializeTable(v, indent .. "  ")
-        elseif type(v) == "string" then
-            vv = '"' .. v:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r") .. '"'
-        elseif type(v) == "number" or type(v) == "boolean" then
-            vv = tostring(v)
-        else
-            vv = nil -- 跳过无法序列化的值
-        end
-        if vv then lines[#lines + 1] = string.format("%s  %s = %s,", indent, ks, vv) end
-    end
-    lines[#lines + 1] = indent .. "}"
-    return table.concat(lines, "\n")
-end
-
--- 原子写入：先写临时文件再改名，避免写入中断导致配置损坏
-local function saveConfig()
-    if not CONFIG_DATA then return end
-    local tmp = CONFIG_PATH .. ".tmp"
-    local f = io.open(tmp, "w")
-    if f then
-        f:write("return " .. serializeTable(CONFIG_DATA))
-        f:close()
-        os.rename(tmp, CONFIG_PATH)
-    end
-end
-
-local function loadConfig()
-    if CONFIG_DATA then return CONFIG_DATA end
-    local path = getConfigPath()
-    local f = io.open(path, "r")
-    if f then
-        local content = f:read("*all")
-        f:close()
-        if content and content ~= "" then
-            content = content:gsub("^\239\187\191", "") -- 去 BOM
-            local chunk, err = load(content)
-            if chunk then
-                local ok, data = pcall(chunk)
-                if ok and type(data) == "table" then
-                    CONFIG_DATA = data
-                    return CONFIG_DATA
-                else
-                    logger.warn("[QuickActions] pcall 失败:", err)
-                end
-            else
-                logger.warn("[QuickActions] load 失败:", err)
-            end
-        end
-        -- 配置损坏：备份后使用默认
-        logger.warn("[QuickActions] 配置文件损坏，备份原文件后使用默认配置")
-        pcall(function() os.rename(path, path .. ".bak") end)
-        CONFIG_DATA = DEFAULT_CONFIG
-        saveConfig()
-        return CONFIG_DATA
-    end
-    logger.info("[QuickActions] 配置文件不存在，创建默认配置")
-    CONFIG_DATA = DEFAULT_CONFIG
-    saveConfig()
-    return CONFIG_DATA
-end
-
--- ============================================================
--- 配置访问
--- ============================================================
-local function getSetting(key)
-    local cfg = loadConfig()
-    local val = cfg[key]
-    if val ~= nil then return val end
-    return DEFAULT_CONFIG[key]
-end
-
-local function setSetting(key, value)
-    loadConfig()[key] = value
-    saveConfig()
-end
-
-local function getBool(key)
-    local val = getSetting(key)
-    if type(val) == "boolean" then return val end
-    return DEFAULT_CONFIG[key] == true
-end
-local function setBool(key, value) setSetting(key, value == true) end
-
-local function getString(key)
-    local val = getSetting(key)
-    if type(val) == "string" then return val end
-    return DEFAULT_CONFIG[key] or ""
-end
-local function setString(key, value) setSetting(key, value) end
-
-local function getNumber(key)
-    local val = getSetting(key)
-    if type(val) == "number" then return val end
-    return DEFAULT_CONFIG[key] or 0
-end
-local function setNumber(key, value) setSetting(key, value) end
-
-local function getTable(key)
-    local val = loadConfig()[key]
-    if type(val) == "table" then return val end
-    return DEFAULT_CONFIG[key] or {}
-end
-
--- 深拷贝后落盘，避免外部修改直接污染配置
-local function setTable(key, value)
-    local json = require("json")
-    loadConfig()[key] = json.decode(json.encode(value))
-    saveConfig()
-end
-
--- ============================================================
--- 对话框 / 面板管理
--- ============================================================
+-- 设置对话框/面板刷新粘合（原与配置区相邻，拆分后保留在主文件：
+-- closeSettingsDialog 依赖主文件维护的 _settings_dialog 状态）
 local function closeSettingsDialog()
     if _settings_dialog then
         UIManager:close(_settings_dialog)
@@ -249,291 +76,64 @@ local function refreshQuickPanel(touch_menu)
 end
 
 -- ============================================================
--- 便捷配置访问
+-- 主文件内共享函数表 QC
 -- ============================================================
-local function isQAEnabled() return getBool("qa_enabled") end
-local function getQASlots()
-    local slots = getSetting("qa_slots")
-    return type(slots) == "table" and slots or DEFAULT_CONFIG.qa_slots
-end
-local function saveQASlots(slots) setSetting("qa_slots", slots) end
-local function showFrontlight() return getBool("qa_frontlight") end
-local function showWarmth() return getBool("qa_warmth") end
-local function showSliderValue() return getBool("qa_slider_show_value") end
-local function getSliderStyle() return getString("qa_slider_style") end
-local function getShape() return getString("qa_shape") end
-local function getBg() return getString("qa_bg") end
-local function showLabels() return getBool("qa_labels") end
-local function getLabelScalePct()
-    return math.max(50, math.min(200, math.floor(getNumber("qa_label_scale_pct"))))
-end
-local function getLabelScale() return getLabelScalePct() / 100 end
-local function buttonHoldEdit() return getBool("qa_button_hold_edit") end
-local function settingsOnHold() return getBool("qa_settings_on_hold") end
-local function getButtonSizePct()
-    return math.max(60, math.min(150, math.floor(getNumber("qa_button_size_pct"))))
-end
+-- 本文件保留原补丁的菜单/面板/动作/对话框等主体；原先为规避 Lua「单函数 200 个
+-- 活跃局部变量」上限（LUAI_MAXVARS）而外提成 _G 全局的 18 个函数/表，插件化时已全部
+-- 改为挂在模块局部表 QC 上（不写 _G）。拆分出子模块后，属于 qc_uifont/qc_icons 的
+-- 入口在下方的「子模块装配」块里桥接回 QC 字段；其余仍在文件后部以
+-- function QC.xxx() ... end 形式挂载，加载完成后即可被各闭包引用。
+local QC = {}
 
 -- ============================================================
--- 插件 / 补丁扫描（独立实现，扫描结果缓存：插件列表运行期不变）
+-- 子模块装配（模块化拆分，逻辑不变）
+--   qc_config 配置 / qc_scan 插件扫描 / qc_uifont UI字体 / qc_icons 图标
+-- 子模块 require 时完成各自初始化；此处仅取导出并桥接回原标识符，
+-- 下方正文（动作注册、面板、对话框、补丁安装、插件类）无需改动。
 -- ============================================================
--- 菜单回调的桩对象：插件 addToMainMenu 会向其写入菜单项
-local TOUCHMENU_STUB = {
-    closeMenu = function() end,
-    onClose = function() end,
-    updateItems = function() end,
-    handleEvent = function() return false end,
-}
+local qc_config = require("qc_config")
+local qc_scan = require("qc_scan")
+local qc_uifont = require("qc_uifont")
+local qc_icons = require("qc_icons")
+local CONFIG_PATH, CONFIG_DATA, DEFAULT_CONFIG, MAX_SLOTS = qc_config.CONFIG_PATH, qc_config.CONFIG_DATA, qc_config.DEFAULT_CONFIG, qc_config.MAX_SLOTS
+local getConfigPath, saveConfig, loadConfig = qc_config.getConfigPath, qc_config.saveConfig, qc_config.loadConfig
+local getSetting, setSetting = qc_config.getSetting, qc_config.setSetting
+local getBool, setBool = qc_config.getBool, qc_config.setBool
+local getString, setString = qc_config.getString, qc_config.setString
+local getNumber, setNumber = qc_config.getNumber, qc_config.setNumber
+local getTable, setTable = qc_config.getTable, qc_config.setTable
+local serializeTable = qc_config.serializeTable
+local isQAEnabled, getQASlots, saveQASlots = qc_config.isQAEnabled, qc_config.getQASlots, qc_config.saveQASlots
+local showFrontlight, showWarmth, showSliderValue = qc_config.showFrontlight, qc_config.showWarmth, qc_config.showSliderValue
+local getSliderStyle, getShape, getBg = qc_config.getSliderStyle, qc_config.getShape, qc_config.getBg
+local showLabels, getLabelScalePct, getLabelScale = qc_config.showLabels, qc_config.getLabelScalePct, qc_config.getLabelScale
+local buttonHoldEdit, settingsOnHold = qc_config.buttonHoldEdit, qc_config.settingsOnHold
+local getButtonSizePct = qc_config.getButtonSizePct
+local TOUCHMENU_STUB = qc_scan.TOUCHMENU_STUB
+local PluginScan = qc_scan.PluginScan
+local live_plugin, findMenuItem, probe_menu_entry, menuSubTable, entry_text =
+    qc_scan.live_plugin, qc_scan.findMenuItem, qc_scan.probe_menu_entry, qc_scan.menuSubTable, qc_scan.entry_text
+local applyUIFontChanges, setUIFontOverride, resetAllUIFonts = qc_uifont.applyUIFontChanges, qc_uifont.setUIFontOverride, qc_uifont.resetAllUIFonts
+local askRestart = qc_uifont.askRestart
+local getIconsDir, getIconWidget, showIconPicker = qc_icons.getIconsDir, qc_icons.getIconWidget, qc_icons.showIconPicker
+local isNerdIcon, clearFileIconsCache, getFileIcons, resetSystemTempOverrides =
+    qc_icons.isNerdIcon, qc_icons.clearFileIconsCache, qc_icons.getFileIcons, qc_icons.resetSystemTempOverrides
+-- QC 桥：原先挂 QC 表、现位于子模块的入口；保持正文 QC.xxx 写法不变
+QC.showFontPickerForUIKey = qc_uifont.showFontPickerForUIKey
+QC.showUIFontSwitcher = qc_uifont.showUIFontSwitcher
+QC.nerdIconChar = qc_icons.nerdIconChar
 
-local PluginScan = {}
-PluginScan.SENTINEL = "__menu_callback"
-PluginScan.SUBMENU = "__menu_submenu"
 
-local EXCLUDED_PLUGINS = { zen_ui = true }
-local LAUNCH_METHODS = { "onShow", "show", "open", "launch", "onOpen" }
-
-local function plugin_loader()
-    local ok, loader = pcall(require, "pluginloader")
-    return ok and loader or nil
+-- ============================================================
+-- ButtonDialog 全局补丁：默认 10 行/页
+-- ============================================================
+local _orig_ButtonDialog_new = ButtonDialog.new
+function ButtonDialog.new(_, ...)
+    local args = {...}
+    if type(args[1]) ~= "table" then args = {} else args = args[1] end
+    if args.rows_per_page == nil then args.rows_per_page = 10 end
+    return _orig_ButtonDialog_new(_, args)
 end
-
-local function live_uis()
-    local out = {}
-    local fm_mod = package.loaded["apps/filemanager/filemanager"]
-    if fm_mod and fm_mod.instance then out[#out + 1] = fm_mod.instance end
-    local reader_mod = package.loaded["apps/reader/readerui"]
-    if reader_mod and reader_mod.instance then out[#out + 1] = reader_mod.instance end
-    return out
-end
-
-local function enabled_plugin_names()
-    local names = {}
-    local loader = plugin_loader()
-    if not (loader and type(loader.loadPlugins) == "function") then return names end
-    local ok, enabled = pcall(loader.loadPlugins, loader)
-    if not ok or type(enabled) ~= "table" then return names end
-    for _i, plugin in ipairs(enabled) do
-        if type(plugin) == "table" and type(plugin.name) == "string" then names[plugin.name] = true end
-    end
-    names.zen_ui = nil
-    return names
-end
-
-local function is_callable(value)
-    if type(value) == "function" then return true end
-    local mt = type(value) == "table" and getmetatable(value) or nil
-    return type(mt) == "table" and type(mt.__call) == "function"
-end
-
--- 用空表探测插件的 addToMainMenu，取到该插件的主菜单项
-local function probe_menu_entry(mod, key)
-    if type(mod.addToMainMenu) ~= "function" then return nil end
-    local probe = {}
-    local ok = pcall(mod.addToMainMenu, mod, probe)
-    if not ok then return nil end
-    local entry = probe[key]
-    if entry == nil and type(mod.name) == "string" then entry = probe[mod.name] end
-    if entry == nil then
-        local only, count = nil, 0
-        for _k, value in pairs(probe) do
-            if type(value) == "table" then count = count + 1; only = value end
-        end
-        if count == 1 then entry = only end
-    end
-    return type(entry) == "table" and entry or nil
-end
-
-local function text_without_glyph(text)
-    if type(text) ~= "string" then return nil end
-    return (text:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
-local function entry_text(entry)
-    if type(entry) ~= "table" then return nil end
-    if type(entry.text_func) == "function" then
-        local ok, text = pcall(entry.text_func)
-        if ok then return text_without_glyph(text) end
-    end
-    return text_without_glyph(entry.text)
-end
-
-local function find_method(mod, key)
-    for _i, method in ipairs(LAUNCH_METHODS) do
-        if is_callable(mod[method]) then return method end
-    end
-    local camel = "on" .. key:sub(1, 1):upper() .. key:sub(2)
-    if is_callable(mod[camel]) then return camel end
-    local entry = probe_menu_entry(mod, key)
-    if entry then
-        if type(entry.callback) == "function" then return PluginScan.SENTINEL end
-        if entry.sub_item_table ~= nil or entry.sub_item_table_func ~= nil then return PluginScan.SUBMENU end
-    end
-end
-
-local function add_candidate(out, seen, key, mod)
-    if type(key) ~= "string" or key == "" or EXCLUDED_PLUGINS[key] or seen[key] or type(mod) ~= "table" then return end
-    local method = find_method(mod, key)
-    if not method then return end
-    seen[key] = true
-    local entry = probe_menu_entry(mod, key)
-    local title = entry_text(entry)
-    if not title or title == "" then title = key:sub(1, 1):upper() .. key:sub(2) end
-    out[#out + 1] = { key = key, method = method, title = title }
-end
-
--- 解析菜单项的子菜单表（兼容 sub_item_table / sub_item_table_func）
-local function menuSubTable(item)
-    if type(item) ~= "table" then return nil end
-    local sub = item.sub_item_table
-    if sub == nil and type(item.sub_item_table_func) == "function" then
-        local ok, res = pcall(item.sub_item_table_func, TOUCHMENU_STUB)
-        if ok then sub = res end
-    end
-    return type(sub) == "table" and sub or nil
-end
-
--- 按标题在菜单项树中查找可执行项（补丁动作复用）
-local function findMenuItem(items, title)
-    if type(items) ~= "table" then return nil end
-    for _i, item in ipairs(items) do
-        if type(item) == "table" then
-            if entry_text(item) == title and type(item.callback) == "function" then return item.callback end
-            local sub = menuSubTable(item)
-            if sub then
-                local cb = findMenuItem(sub, title)
-                if cb then return cb end
-            end
-        end
-    end
-    return nil
-end
-
-function PluginScan.scan()
-    if PluginScan._scan_cache then return PluginScan._scan_cache end
-    local ok, results = pcall(function()
-        local out, seen = {}, {}
-        local loader = plugin_loader()
-        if loader and type(loader.loaded_plugins) == "table" then
-            for key, mod in pairs(loader.loaded_plugins) do add_candidate(out, seen, key, mod) end
-        end
-        local names = enabled_plugin_names()
-        if loader and type(loader.getPluginInstance) == "function" then
-            for key in pairs(names) do
-                local ok_plugin, plugin = pcall(loader.getPluginInstance, loader, key)
-                if ok_plugin then add_candidate(out, seen, key, plugin) end
-            end
-        end
-        for _i, ui in ipairs(live_uis()) do
-            for key in pairs(names) do add_candidate(out, seen, key, ui[key]) end
-        end
-        -- 扫描补丁：直接遍历菜单项的 callback 项
-        local function scanPatchItems(items, parent_title)
-            if type(items) ~= "table" then return end
-            for _i, item in ipairs(items) do
-                if type(item) == "table" then
-                    local text = entry_text(item)
-                    local sub = menuSubTable(item)
-                    if sub and #sub > 0 then
-                        scanPatchItems(sub, text) -- 递归：传递当前 text 为父级
-                    elseif text and type(item.callback) == "function" then
-                        local display_title = parent_title and (parent_title .. " · " .. text) or text
-                        local patch_key = "patch_" .. display_title
-                        if not seen[patch_key] then
-                            seen[patch_key] = true
-                            out[#out + 1] = { key = patch_key, method = PluginScan.SENTINEL, title = text, display_title = display_title, is_patch = true }
-                        end
-                    end
-                end
-            end
-        end
-        local FM = require("apps/filemanager/filemanager")
-        local fm = FM and FM.instance
-        if fm and fm.menu and fm.menu.menu_items then scanPatchItems(fm.menu.menu_items) end
-        local RUI = require("apps/reader/readerui")
-        local reader = RUI and RUI.instance
-        if reader and reader.menu and reader.menu.menu_items then scanPatchItems(reader.menu.menu_items) end
-        table.sort(out, function(a, b) return a.title < b.title end)
-        return out
-    end)
-    PluginScan._scan_cache = ok and results or {}
-    return PluginScan._scan_cache
-end
-
-local function live_plugin(key)
-    local loader = plugin_loader()
-    local loaded = loader and loader.loaded_plugins
-    if type(loaded) == "table" and type(loaded[key]) == "table" then return loaded[key] end
-    if loader and type(loader.getPluginInstance) == "function" then
-        local ok, plugin = pcall(loader.getPluginInstance, loader, key)
-        if ok and type(plugin) == "table" then return plugin end
-    end
-    for _i, ui in ipairs(live_uis()) do
-        if type(ui[key]) == "table" then return ui[key] end
-    end
-end
-
-function PluginScan.resolve(key, method)
-    -- 补丁动作：按标题查找菜单项回调
-    if type(key) == "string" and string.sub(key, 1, 6) == "patch_" then
-        local menu_title = string.sub(key, 7):gsub("^.* · ", "")
-        local callback = nil
-        local FM = require("apps/filemanager/filemanager")
-        local fm = FM and FM.instance
-        if fm and fm.menu and fm.menu.menu_items then callback = findMenuItem(fm.menu.menu_items, menu_title) end
-        if not callback then
-            local RUI = require("apps/reader/readerui")
-            local reader = RUI and RUI.instance
-            if reader and reader.menu and reader.menu.menu_items then callback = findMenuItem(reader.menu.menu_items, menu_title) end
-        end
-        if callback then
-            return function() return callback(TOUCHMENU_STUB) end
-        end
-        return nil
-    end
-    if type(key) ~= "string" or type(method) ~= "string" then return nil end
-    local mod = live_plugin(key)
-    if type(mod) ~= "table" then return nil end
-    if method == PluginScan.SENTINEL then
-        local entry = probe_menu_entry(mod, key)
-        local callback = entry and entry.callback
-        if type(callback) ~= "function" then return nil end
-        return function() return callback(TOUCHMENU_STUB) end
-    end
-    if method == PluginScan.SUBMENU then
-        local entry = probe_menu_entry(mod, key)
-        if not entry then return nil end
-        local sub_items = menuSubTable(entry)
-        if not sub_items then return nil end
-        local title = type(entry.text) == "string" and entry.text or key
-        return function()
-            local ok_host, menu_host = pcall(require, "modules/menu/app_launcher/menu_host")
-            if ok_host and menu_host and type(menu_host.show) == "function" then
-                return menu_host.show{ title = title, item_table = sub_items }
-            end
-            local buttons = {}
-            for _i, item in ipairs(sub_items) do
-                local cb = item.callback
-                local text = item.text
-                if type(item.text_func) == "function" then text = item.text_func() end
-                if type(text) == "string" then
-                    buttons[#buttons + 1] = {{
-                        text = text,
-                        callback = function() if cb then cb() end end,
-                    }}
-                end
-            end
-            UIManager:show(ButtonDialog:new{
-                title = title,
-                title_align = "center",
-                buttons = buttons,
-                width = math.floor(Screen:getWidth() * 0.7),
-            })
-        end
-    end
-    if not is_callable(mod[method]) then return nil end
-    return function() return mod[method](mod) end
-end
-
 -- 文件管理器 / 阅读器实例（带 pcall 保护）
 local function getInstances()
     local ok, FM = pcall(require, "apps/filemanager/filemanager")
@@ -671,1202 +271,6 @@ local function executeCustomAction(cfg, ctx)
             pcall(resolve_func)
         end
     end
-end
-
--- ============================================================
--- UI 字体切换（三种字体类型，自动替换所有对应 key）
--- ============================================================
-local _font_picker_dialog = nil
-local _font_main_dialog = nil
-
-local function getAvailableFonts()
-    local result = {}
-    for idx, path in ipairs(FontList:getFontList()) do
-        local fname, name = util.splitFilePathName(path)
-        if name and (name:match("%.ttf$") or name:match("%.otf$")) then
-            result[#result + 1] = {
-                name = name,
-                display = name:gsub("%.ttf$", ""):gsub("%.otf$", ""):gsub("_", " "),
-            }
-        end
-    end
-    table.sort(result, function(a, b) return a.display:lower() < b.display:lower() end)
-    return result
-end
-
-local UI_FONT_ITEMS = {
-    { key = "regular", label = _("常规字体"), default = "NotoSans-Regular.ttf" },
-    { key = "bold", label = _("粗体字体"), default = "NotoSans-Bold.ttf" },
-    { key = "mono", label = _("等宽字体"), default = "DroidSansMono.ttf" },
-}
-local FONT_TYPE_MAP = {
-    regular = { "cfont", "ffont", "smallffont", "largeffont", "rifont", "pgfont", "hfont", "infofont", "smallinfofont", "x_smallinfofont", "xx_smallinfofont" },
-    bold = { "tfont", "smalltfont", "x_smalltfont", "smallinfofontbold" },
-    mono = { "scfont", "hpkfont", "infont", "smallinfont" },
-}
-
-local function applyUIFontChanges()
-    local overrides = getTable("ui_font_overrides") or {}
-    local font_exists = {}
-    for idx, path in ipairs(FontList:getFontList()) do
-        local fname, name = util.splitFilePathName(path)
-        if name then font_exists[name] = true end
-    end
-    local defaults = { regular = "NotoSans-Regular.ttf", bold = "NotoSans-Bold.ttf", mono = "DroidSansMono.ttf" }
-    for kind, keys in pairs(FONT_TYPE_MAP) do
-        local font_name = overrides[kind] or defaults[kind]
-        if font_exists[font_name] then
-            for _i, k in ipairs(keys) do Font.fontmap[k] = font_name end
-        end
-    end
-    Font.faces = {}
-    -- 统一覆盖各组件默认字体（face/fface 字段）
-    local function overrideFace(modname, field, font_key, default_size)
-        local ok, mod = pcall(require, modname)
-        if ok and mod and mod[field] then
-            mod[field] = Font:getFace(font_key, mod[field].orig_size or default_size)
-        end
-    end
-    overrideFace("ui/widget/touchmenu", "fface", "cfont", 24)
-    overrideFace("ui/widget/confirmbox", "face", "cfont", 22)
-    overrideFace("ui/widget/infomessage", "face", "infofont", 22)
-    overrideFace("ui/widget/notification", "face", "x_smallinfofont", 18)
-    overrideFace("ui/widget/buttondialog", "title_face", "tfont", 20)
-    overrideFace("ui/widget/buttondialog", "info_face", "infofont", 22)
-    overrideFace("ui/widget/inputdialog", "input_face", "infont", 16)
-    overrideFace("ui/widget/multiinputdialog", "title_face", "tfont", 20)
-    overrideFace("ui/widget/multiinputdialog", "info_face", "infofont", 22)
-    Button.text_font_face = overrides.regular or defaults.regular
-    -- 菜单/触摸菜单项字体补丁（两处逻辑相同，合并）
-    local function patchMenuUpdateItems(modname)
-        local ok_mod, mod = pcall(require, modname)
-        if not (ok_mod and mod and mod.updateItems) then return end
-        local orig_update = mod.updateItems
-        mod.updateItems = function(self, ...)
-            if not self._font_patched then
-                for i = 1, #self.item_group do
-                    local widget = self.item_group[i]
-                    if widget and widget.face then
-                        local cls = getmetatable(widget)
-                        if cls then cls.font = overrides.regular or defaults.regular; cls.infont = overrides.regular or defaults.regular end
-                    end
-                end
-                self._font_patched = true
-            end
-            return orig_update(self, ...)
-        end
-    end
-    patchMenuUpdateItems("ui/widget/menu")
-    patchMenuUpdateItems("ui/widget/touchmenu")
-end
-
-local function setUIFontOverride(key, font_name)
-    local overrides = getTable("ui_font_overrides") or {}
-    if font_name then overrides[key] = font_name else overrides[key] = nil end
-    setTable("ui_font_overrides", overrides)
-    applyUIFontChanges()
-    UIManager:setDirty("all", "full")
-end
-
-local function resetAllUIFonts()
-    setTable("ui_font_overrides", {})
-    UIManager:show(Notification:new{ text = _("已重置所有UI字体，重启后生效"), timeout = 2 })
-    UIManager:show(ConfirmBox:new{
-        text = _("重启后生效。立即重启？"),
-        ok_text = _("重启"),
-        cancel_text = _("稍后"),
-        ok_callback = function() UIManager:restartKOReader() end,
-    })
-end
-
--- 重启确认框（多处共用）
-local function askRestart(text)
-    UIManager:show(ConfirmBox:new{
-        text = text or _("重启后生效。立即重启？"),
-        ok_text = _("重启"),
-        cancel_text = _("稍后"),
-        ok_callback = function() UIManager:restartKOReader() end,
-    })
-end
-
-function showFontPickerForUIKey(ui_key, ui_label, on_select, on_cancel)
-    if _font_picker_dialog then UIManager:close(_font_picker_dialog); _font_picker_dialog = nil end
-    local all_fonts = getAvailableFonts()
-    local current = getTable("ui_font_overrides")[ui_key] or ""
-    local buttons = {}
-    local function closePicker()
-        if _font_picker_dialog then UIManager:close(_font_picker_dialog); _font_picker_dialog = nil end
-    end
-    buttons[#buttons + 1] = {{ text = _("应用默认"), callback = function() closePicker(); if on_select then on_select(nil) end end }}
-    buttons[#buttons + 1] = {{ text = _("返回"), callback = function() closePicker(); if on_cancel then on_cancel() end end }}
-    buttons[#buttons + 1] = {}
-    if #all_fonts == 0 then
-        buttons[#buttons + 1] = {{ text = _("没有可用的字体文件"), enabled = false }}
-    else
-        for i, font in ipairs(all_fonts) do
-            local is_current = (font.name == current)
-            buttons[#buttons + 1] = {{
-                text = (is_current and "✓ " or "  ") .. font.display,
-                callback = function()
-                    closePicker()
-                    if on_select then on_select(font.name) end
-                end,
-            }}
-        end
-    end
-    _font_picker_dialog = ButtonDialog:new{
-        title = string.format(_("选择 %s 字体"), ui_label),
-        title_align = "center",
-        buttons = buttons,
-        width = math.floor(Screen:getWidth() * 0.7),
-        max_height = math.floor(Screen:getHeight() * 0.7),
-    }
-    UIManager:show(_font_picker_dialog)
-end
-
-function showUIFontSwitcher()
-    if _font_main_dialog then UIManager:close(_font_main_dialog); _font_main_dialog = nil end
-    if _font_picker_dialog then UIManager:close(_font_picker_dialog); _font_picker_dialog = nil end
-    local overrides = getTable("ui_font_overrides") or {}
-    local replaced_count = 0
-    for i, item in ipairs(UI_FONT_ITEMS) do
-        if overrides[item.key] then replaced_count = replaced_count + 1 end
-    end
-    local buttons = {}
-    local function closeMain()
-        if _font_main_dialog then UIManager:close(_font_main_dialog); _font_main_dialog = nil end
-    end
-    buttons[#buttons + 1] = {{
-        text = string.format(_("重置全部 (%d/%d)"), replaced_count, #UI_FONT_ITEMS),
-        callback = function() closeMain(); resetAllUIFonts() end,
-    }}
-    buttons[#buttons + 1] = {}
-    for i, item in ipairs(UI_FONT_ITEMS) do
-        local override = overrides[item.key]
-        local display = (override or item.default):gsub("%.ttf$", ""):gsub("%.otf$", ""):gsub("_", " ")
-        local text = item.label .. ": " .. display
-        if override then
-            local default_display = item.default:gsub("%.ttf$", ""):gsub("%.otf$", ""):gsub("_", " ")
-            text = item.label .. ": " .. default_display .. " → " .. display
-        end
-        buttons[#buttons + 1] = {{
-            text = text,
-            callback = function()
-                closeMain()
-                showFontPickerForUIKey(
-                    item.key,
-                    item.label,
-                    function(new_font)
-                        if new_font then
-                            setUIFontOverride(item.key, new_font)
-                            UIManager:show(Notification:new{
-                                text = string.format(_("%s 已设置为 %s"), item.label, new_font),
-                                timeout = 2,
-                            })
-                        else
-                            setUIFontOverride(item.key, nil)
-                            UIManager:show(Notification:new{
-                                text = string.format(_("%s 已重置为默认"), item.label),
-                                timeout = 2,
-                            })
-                        end
-                        showUIFontSwitcher()
-                    end,
-                    function() showUIFontSwitcher() end
-                )
-            end,
-        }}
-    end
-    _font_main_dialog = ButtonDialog:new{
-        title = _("UI字体切换"),
-        title_align = "center",
-        buttons = buttons,
-        width = math.floor(Screen:getWidth() * 0.7),
-        max_height = math.floor(Screen:getHeight() * 0.7),
-    }
-    UIManager:show(_font_main_dialog)
-end
-
-applyUIFontChanges()
-
--- ============================================================
--- Nerd Font 支持（全局函数：图标码位 ↔ UTF-8 字符）
--- ============================================================
-function nerdIconChar(icon_value)
-    if type(icon_value) ~= "string" then return nil end
-    local hex = icon_value:match("^nerd:([0-9A-Fa-f]+)$")
-    if not hex then return nil end
-    local cp = tonumber(hex, 16)
-    if not cp or cp < 0 or cp > 0x10FFFF then return nil end
-    if cp < 0x80 then
-        return string.char(cp)
-    elseif cp < 0x800 then
-        return string.char(0xC0 + math.floor(cp / 0x40), 0x80 + (cp % 0x40))
-    elseif cp < 0x10000 then
-        return string.char(0xE0 + math.floor(cp / 0x1000), 0x80 + math.floor((cp % 0x1000) / 0x40), 0x80 + (cp % 0x40))
-    end
-    return string.char(0xF0 + math.floor(cp / 0x40000), 0x80 + math.floor((cp % 0x40000) / 0x1000),
-        0x80 + math.floor((cp % 0x1000) / 0x40), 0x80 + (cp % 0x40))
-end
-
-local function isNerdIcon(icon_value) return nerdIconChar(icon_value) ~= nil end
-
--- ============================================================
--- Nerd Font 图标列表（从 symbols 字体读取字形，码位区间单遍扫描）
--- ============================================================
-local ffi = require("ffi")
-ffi.cdef[[
-    FT_Error FT_Get_Glyph_Name(FT_Face face, FT_UInt glyph_index, FT_String *buffer, FT_UInt buffer_max);
-]]
-local ft2 = ffi.loadlib("freetype", "6")
-
-local NERD_RANGES = {
-    {0x23FB, 0x23FE}, {0xE700, 0xE7FF}, {0xF000, 0xF3FF}, {0xF500, 0xF8FF},
-    {0xE800, 0xE8FF}, {0xE000, 0xE09F}, {0xE100, 0xE2FF}, {0xE400, 0xE6FF},
-    {0xF400, 0xF4FF}, {0xE300, 0xE3FF}, {0xE0A0, 0xE0FF},
-}
-
-local function getNerdGlyphName(cp, face)
-    if not cp or type(cp) ~= "number" then return nil end
-    face = face or Font:getFace("symbols", 12)
-    local ft_face = face and face.ftsize and face.ftsize.face
-    if not ft_face then return nil end
-    local glyph_index = ft2.FT_Get_Char_Index(ft_face, cp)
-    if glyph_index == 0 then return nil end
-    local buffer = ffi.new("FT_String[128]")
-    if ft2.FT_Get_Glyph_Name(ft_face, glyph_index, buffer, 128) ~= 0 then return nil end
-    return ffi.string(buffer)
-end
-
--- face 只取一次（原来每码点都 Font:getFace，约 900 次查找 → 1 次）
-local function getNerdIcons()
-    local icons = {}
-    local face = Font:getFace("symbols", 12)
-    if not (face and face.ftsize) then return icons end
-    for _i, range in ipairs(NERD_RANGES) do
-        for cp = range[1], range[2] do
-            if face.ftsize:hasGlyph(cp) then
-                local hex = string.format("%04X", cp)
-                icons[#icons + 1] = { type = "nerd", hex = hex, value = "nerd:" .. hex, name = getNerdGlyphName(cp, face) }
-            end
-        end
-    end
-    return icons
-end
-
--- ============================================================
--- 图标解析（带缓存：图标文件运行期不变；miss 用哨兵缓存防反复探测）
--- ============================================================
-local _icons_dir = nil
-local function getIconsDir()
-    if _icons_dir then return _icons_dir end
-    local ok, DataStorage = pcall(require, "datastorage")
-    _icons_dir = ok and DataStorage and DataStorage:getDataDir() .. "/icons" or "./icons"
-    return _icons_dir
-end
-
-local _icon_cache = { map = {}, miss = {} }
-
-local function getIconFile(icon_name)
-    if not icon_name then return nil end
-    if isNerdIcon(icon_name) then return icon_name end
-    local cached = _icon_cache.map[icon_name]
-    if cached ~= nil then return cached == _icon_cache.miss and nil or cached end
-    local result
-    if icon_name:sub(1, 1) == "/" and lfs.attributes(icon_name, "mode") == "file" then
-        result = icon_name
-    end
-    if not result then
-        local ok, DataStorage = pcall(require, "datastorage")
-        if ok and DataStorage then
-            local full_path = (DataStorage:getDataDir() .. "/" .. icon_name):gsub("/%.", ""):gsub("/+", "/")
-            if lfs.attributes(full_path, "mode") == "file" then result = full_path end
-        end
-    end
-    if not result then
-        local filename = icon_name:match("([^/]+)$") or icon_name
-        local dirs_to_check = { getIconsDir(), "resources/icons/mdlight", "resources/icons", "resources" }
-        for _i, dir in ipairs(dirs_to_check) do
-            local path = dir .. "/" .. filename
-            if lfs.attributes(path, "mode") == "file" then result = path; break end
-        end
-    end
-    _icon_cache.map[icon_name] = result or _icon_cache.miss
-    return result
-end
-
-local function getIconWidget(icon_path, size)
-    size = size or Screen:scaleBySize(24)
-    if isNerdIcon(icon_path) then
-        local nerd_char = nerdIconChar(icon_path)
-        if nerd_char then
-            return TextWidget:new{
-                text = nerd_char,
-                face = Font:getFace("symbols", math.floor(size * 0.6)),
-                fgcolor = Blitbuffer.COLOR_BLACK,
-                padding = 0,
-            }
-        end
-    end
-    local file_path = getIconFile(icon_path)
-    if file_path and lfs.attributes(file_path, "mode") == "file" then
-        local iw = ImageWidget:new{ file = file_path, width = size, height = size, alpha = true, is_icon = true }
-        local ok_render = pcall(function() iw:_render() end)
-        if ok_render then return iw end
-        iw:free()
-    end
-    return nil
-end
-
--- ============================================================
--- 图标文件浏览器
--- ============================================================
-local THUMB_SIZE = Screen:scaleBySize(32)
-local THUMB_GAP = Screen:scaleBySize(6)
-
-local _InnerIconChooser = PathChooser:extend{
-    select_directory = false,
-    select_file = true,
-    state_w = THUMB_SIZE + THUMB_GAP,
-    path = getIconsDir(),
-    onConfirm = nil,
-    _filter_text = "",
-    _all_items = nil,
-    stop_events_propagation = true,
-}
-
-function _InnerIconChooser:init()
-    self.title = _('选择图标')
-    self.file_filter = function(filename)
-        local ext = filename:lower()
-        return ext:match('%.svg$') ~= nil or ext:match('%.png$') ~= nil
-    end
-    self.state_w = THUMB_SIZE + THUMB_GAP
-    PathChooser.init(self)
-    if not self._all_items then self:refreshPath() end
-end
-
-function _InnerIconChooser:getCollate()
-    return self.collates.strcoll, "strcoll"
-end
-
-function _InnerIconChooser:refreshPath()
-    local _, folder_name = util.splitFilePathName(self.path)
-    Screen:setWindowTitle(folder_name)
-    self._all_items = self:genItemTableFromPath(self.path)
-    self:_applyCurrentFilter()
-end
-
-function _InnerIconChooser:_applyCurrentFilter()
-    local filter_text = self._filter_text or ""
-    local items
-    if filter_text == "" then
-        items = self._all_items
-    else
-        items = {}
-        local pattern = filter_text:lower()
-        for _i, item in ipairs(self._all_items) do
-            if item.is_go_up or (item.text and item.text:lower():find(pattern, 1, true)) then
-                items[#items + 1] = item
-            end
-        end
-    end
-    local itemmatch
-    if self.focused_path then itemmatch = { path = self.focused_path }; self.focused_path = nil end
-    local subtitle = BD.directory(filemanagerutil.abbreviate(self.path))
-    self:switchItemTable(nil, items, filter_text == "" and self.path_items[self.path] or 1, itemmatch, subtitle)
-end
-
-function _InnerIconChooser:applyFilter(text)
-    self._filter_text = text or ""
-    if self._all_items then self:_applyCurrentFilter() end
-end
-
-function _InnerIconChooser:_recalculateDimen(no_recalculate_dimen)
-    Menu._recalculateDimen(self, no_recalculate_dimen)
-    if not self.item_dimen then return end
-    if self._filter_bar_height and self._filter_bar_height > 0 and not no_recalculate_dimen then
-        self.available_height = self.available_height - self._filter_bar_height
-        self.item_dimen.h = math.floor(self.available_height / self.perpage)
-    end
-    local content_w = math.max(0, self.item_dimen.w - 2 * Size.padding.fullscreen)
-    local max_state_w = math.max(1, math.floor(content_w / 4))
-    local ts, tg = THUMB_SIZE, THUMB_GAP
-    self.state_w = math.min(ts + tg, max_state_w)
-    self._thumb_size = math.max(0, math.min(ts, self.state_w - tg))
-end
-
-function _InnerIconChooser:updateItems(select_number, no_recalculate_dimen)
-    Menu.updateItems(self, select_number, no_recalculate_dimen)
-    self.path_items[self.path] = (self.page - 1) * self.perpage + (select_number or 1)
-    local eff_thumb = self._thumb_size or 0
-    if eff_thumb <= 0 then return end
-    local item_h = self.item_dimen and self.item_dimen.h or eff_thumb
-    local center_y = math.max(0, math.floor((item_h - eff_thumb) / 2))
-    for _i, item_widget in ipairs(self.item_group) do
-        local entry = item_widget.entry
-        if not entry then goto continue end
-        local filepath = entry.path or ""
-        if not filepath:lower():match("%.svg$") and not filepath:lower():match("%.png$") then goto continue end
-        local uc = item_widget._underline_container
-        local hg = uc and uc[1]
-        local og = hg and hg[1]
-        if og then
-            -- 缩略图插到行首（与 PathChooser 原布局一致）
-            table.insert(og, 1, ImageWidget:new{
-                file = filepath,
-                width = eff_thumb,
-                height = eff_thumb,
-                alpha = true,
-                overlap_offset = { 0, center_y },
-            })
-            og._size = nil
-        end
-        ::continue::
-    end
-end
-
-function _InnerIconChooser:onMenuSelect(item)
-    local path = item.path or ""
-    if path:lower():match("%.svg$") or path:lower():match("%.png$") then
-        if self.show_parent then self.show_parent:onClose() end
-        if self.onConfirm then self.onConfirm(path) end
-        return true
-    end
-    return PathChooser.onMenuSelect(self, item)
-end
-
-function _InnerIconChooser:onMenuHold(item)
-    local path = item.path or ""
-    if path:lower():match("%.svg$") or path:lower():match("%.png$") then return true end
-    return PathChooser.onMenuHold(self, item)
-end
-
-local IconBrowser = WidgetContainer:extend{
-    path = getIconsDir(),
-    onConfirm = nil,
-    is_always_active = true,
-}
-
-function IconBrowser:init()
-    self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
-    local final_path = nil
-    for _i, path in ipairs({ self.path, "./resources/icons/mdlight", "./" }) do
-        if lfs.attributes(path, "mode") == "directory" then
-            final_path = path
-            break
-        end
-    end
-    if not final_path then
-        UIManager:show(InfoMessage:new{ text = _("找不到图标目录，无法打开图标浏览器"), timeout = 3 })
-        return
-    end
-    self.path = final_path
-    self._filter_input = InputText:new{
-        text = "",
-        hint = _("按名称筛选…"),
-        width = self.dimen.w - 4 * Size.padding.default,
-        height = nil,
-        face = Font:getFace("smallinfofont"),
-        padding = Size.padding.small,
-        margin = 0,
-        bordersize = Size.border.inputtext,
-        parent = self,
-        scroll = false,
-        focused = false,
-        edit_callback = function() self:_applyFilter() end,
-    }
-    self._filter_input.addChars = function(inp, chars)
-        if chars == "\n" then
-            inp:onCloseKeyboard()
-            return
-        end
-        InputText.addChars(inp, chars)
-    end
-    self._filter_bar = FrameContainer:new{
-        padding = Size.padding.default,
-        padding_top = Size.padding.small,
-        padding_bottom = Size.padding.small,
-        bordersize = 0,
-        self._filter_input,
-    }
-    local filter_h = self._filter_bar:getSize().h
-    self._chooser = _InnerIconChooser:new{
-        show_parent = self,
-        path = self.path,
-        onConfirm = self.onConfirm,
-        height = self.dimen.h,
-        close_callback = function() self:onClose() end,
-    }
-    table.insert(self._chooser.content_group, 2, self._filter_bar)
-    self._chooser._filter_bar_height = filter_h
-    self._chooser:refreshPath()
-    self[1] = self._chooser
-end
-
-function IconBrowser:_applyFilter()
-    if not self._chooser then return end
-    local text = self._filter_input and self._filter_input:getText() or ""
-    self._chooser:applyFilter(text)
-end
-
--- 保持不可聚焦（防止实体按键焦点跳到浏览器内部）
-function IconBrowser:getFocusableWidgetXY() return nil, nil end
-
-function IconBrowser:onClose()
-    if self._filter_input then self._filter_input:onCloseKeyboard() end
-    UIManager:close(self)
-end
-
--- ============================================================
--- 扫描图标目录中的 SVG/PNG 文件
--- ============================================================
-local function scanAllIconDirs(mode)
-    local all_files, seen = {}, {}
-    local dirs_to_scan = (mode == "system")
-        and { "resources/icons/mdlight" }
-        or { getIconsDir(), "resources/icons/mdlight", "resources/icons", "resources" }
-    for _i, dir in ipairs(dirs_to_scan) do
-        if lfs.attributes(dir, "mode") == "directory" then
-            for file in lfs.dir(dir) do
-                if file ~= "." and file ~= ".." then
-                    local ext = file:lower()
-                    if ext:match("%.svg$") or ext:match("%.png$") then
-                        local name = file:gsub("%.[^%.]+$", "")
-                        if not seen[name] then
-                            seen[name] = true
-                            all_files[#all_files + 1] = {
-                                path = dir .. "/" .. file,
-                                name = name,
-                                display_name = name:gsub("_", " "),
-                                ext = ext,
-                                type = "file",
-                            }
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return all_files
-end
-
-local cached_file_icons = nil
-local function getFileIcons()
-    if cached_file_icons == nil then cached_file_icons = scanAllIconDirs() end
-    return cached_file_icons
-end
-
-local picker_cache = {}
-local function clearFileIconsCache()
-    picker_cache = {}
-    cached_file_icons = nil
-end
-
-local system_temp_overrides = nil
-local function getSystemTempOverrides()
-    if system_temp_overrides == nil then
-        system_temp_overrides = {}
-        for k, v in pairs(getTable("qa_icon_overrides")) do system_temp_overrides[k] = v end
-    end
-    return system_temp_overrides
-end
-local function resetSystemTempOverrides() system_temp_overrides = nil end
-
--- ============================================================
--- 图标选择器（网格 + 筛选 + 分页；屏幕尺寸变化自动重算布局）
--- ============================================================
-local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
-    local sw, sh = Screen:getWidth(), Screen:getHeight()
-    local pad = Screen:scaleBySize(24)
-    local brd = Screen:scaleBySize(1)
-    local cache_key = (filter or "all") .. "_" .. (mode or "normal")
-    local use_cache = picker_cache[cache_key] ~= nil
-
-    local icons_list, page_widgets, total_pages
-    local frame_x, frame_y, frame_w, frame_h
-    local content_w, title_bar_h, button_bar_h, footer_h
-    local cols, rows, per_page, h_gap, v_gap
-    local cell_w, cell_h, icon_sz, font_size, cell_pad, grid_w, grid_h
-    local dialog = nil
-    local cur_page = 1
-    local filter_keyword = ""
-    local filtered_icons_list = nil
-    local search_dialog = nil
-
-    local function getDisplayList()
-        -- 防御：icons_list 意外为 nil 时返回空表，避免 #nil 崩溃（历史回归点）
-        if filter_keyword == "" then return icons_list or {} end
-        if filtered_icons_list == nil then
-            filtered_icons_list = {}
-            local pattern = filter_keyword:lower()
-            for _i, icon in ipairs(icons_list or {}) do
-                local hay = icon.type == "nerd" and icon.name or icon.display_name
-                local match = false
-                if icon.type == "nerd" then
-                    if icon.hex:lower():find(pattern, 1, true) then match = true end
-                end
-                if not match and hay and hay:lower():find(pattern, 1, true) then match = true end
-                if not match and icon.type ~= "nerd" and icon.name and icon.name:lower():find(pattern, 1, true) then match = true end
-                if match then filtered_icons_list[#filtered_icons_list + 1] = icon end
-            end
-        end
-        return filtered_icons_list
-    end
-
-    local function rebuildPicker()
-        filtered_icons_list = nil
-        local display_list = getDisplayList()
-        local new_total_pages = math.max(1, math.ceil(#display_list / per_page))
-        local new_page_widgets = {}
-        for p = 1, new_total_pages do
-            local page_vg = VerticalGroup:new{ align = "left" }
-            local start_idx = (p - 1) * per_page + 1
-            for row = 0, rows - 1 do
-                local row_hg = HorizontalGroup:new{ align = "top" }
-                for col = 0, cols - 1 do
-                    local idx = start_idx + row * cols + col
-                    if idx <= #display_list then
-                        local icon = display_list[idx]
-                        local icon_widget
-                        if icon.type == "nerd" then
-                            icon_widget = TextWidget:new{
-                                text = nerdIconChar(icon.value) or "?",
-                                face = Font:getFace("symbols", font_size),
-                                fgcolor = Blitbuffer.COLOR_BLACK,
-                            }
-                        else
-                            local icon_path = icon.path
-                            if mode == "system" and icon.is_overridden and icon.override_path then icon_path = icon.override_path end
-                            icon_widget = IconWidget:new{ file = icon_path, width = icon_sz, height = icon_sz, alpha = true }
-                            pcall(function() icon_widget:_render() end)
-                        end
-                        local cell_content = CenterContainer:new{
-                            dimen = Geom:new{ w = cell_w - cell_pad * 2 - 2, h = cell_h - cell_pad * 2 - 2 },
-                            icon_widget,
-                        }
-                        local border_color, border_size = Blitbuffer.COLOR_LIGHT_GRAY, 1
-                        if mode == "system" and icon.is_overridden then border_color, border_size = Blitbuffer.COLOR_BLACK, 2 end
-                        local cell = FrameContainer:new{
-                            width = cell_w,
-                            height = cell_h,
-                            bordersize = border_size,
-                            color = border_color,
-                            background = Blitbuffer.COLOR_WHITE,
-                            radius = Screen:scaleBySize(4),
-                            padding = cell_pad,
-                            cell_content,
-                        }
-                        row_hg[#row_hg + 1] = cell
-                        if col < cols - 1 then row_hg[#row_hg + 1] = HorizontalSpan:new{ width = h_gap } end
-                    end
-                end
-                page_vg[#page_vg + 1] = row_hg
-                if row < rows - 1 then page_vg[#page_vg + 1] = VerticalSpan:new{ width = v_gap } end
-            end
-            new_page_widgets[p] = page_vg
-        end
-        page_widgets = new_page_widgets
-        total_pages = new_total_pages
-        if cur_page > total_pages then cur_page = 1 end
-        if dialog then UIManager:setDirty(dialog, function() return "ui", dialog.dimen end) end
-    end
-
-    local function showSearchDialog()
-        if search_dialog then UIManager:close(search_dialog); search_dialog = nil end
-        local function onStrike()
-            if search_dialog then
-                filter_keyword = search_dialog:getInputText() or ""
-                filtered_icons_list = nil
-                rebuildPicker()
-                UIManager:setDirty(dialog, function() return "ui", dialog.dimen end)
-            end
-        end
-        search_dialog = InputDialog:new{
-            title = _("筛选图标"),
-            input = filter_keyword,
-            input_hint = _("输入名称或码位..."),
-            strike_callback = onStrike,
-            buttons = {
-                {
-                    {
-                        text = _("清除"),
-                        callback = function()
-                            UIManager:close(search_dialog)
-                            search_dialog = nil
-                            filter_keyword = ""
-                            filtered_icons_list = nil
-                            rebuildPicker()
-                            UIManager:setDirty(dialog, function() return "ui", dialog.dimen end)
-                        end,
-                    },
-                    {
-                        text = _("关闭"),
-                        callback = function()
-                            UIManager:close(search_dialog)
-                            search_dialog = nil
-                        end,
-                    },
-                }
-            },
-        }
-        UIManager:show(search_dialog)
-        pcall(function() search_dialog:onShowKeyboard() end)
-    end
-
-    local temp_overrides = {}
-    if mode == "system" then temp_overrides = getSystemTempOverrides() end
-
-    local cache_valid = false
-    if use_cache and mode ~= "system" then
-        local cached = picker_cache[cache_key]
-        -- 校验缓存完整性：尺寸一致且 icons_list 存在（防缓存结构变化导致 nil）
-        if cached.sw == sw and cached.sh == sh and cached.icons_list then
-            cache_valid = true
-            icons_list, page_widgets, total_pages = cached.icons_list, cached.page_widgets, cached.total_pages
-            frame_x, frame_y, frame_w, frame_h = cached.frame_x, cached.frame_y, cached.frame_w, cached.frame_h
-            content_w, title_bar_h, button_bar_h, footer_h = cached.content_w, cached.title_bar_h, cached.button_bar_h, cached.footer_h
-            cols, rows, per_page, h_gap, v_gap = cached.cols, cached.rows, cached.per_page, cached.h_gap, cached.v_gap
-            cell_w, cell_h, icon_sz, font_size, cell_pad, grid_w, grid_h = cached.cell_w, cached.cell_h, cached.icon_sz, cached.font_size, cached.cell_pad, cached.grid_w, cached.grid_h
-        end
-    end
-
-    if not cache_valid then
-        if use_cache and mode ~= "system" and picker_cache[cache_key].icons_list then
-            icons_list = picker_cache[cache_key].icons_list
-        else
-            icons_list = {}
-            if (not filter or filter == "nerd") and mode ~= "system" then
-                for _i, icon in ipairs(getNerdIcons()) do
-                    icons_list[#icons_list + 1] = { type = "nerd", hex = icon.hex, value = "nerd:" .. icon.hex, name = icon.name }
-                end
-            end
-            if not filter or filter == "file" then
-                local file_icons = (mode == "system") and scanAllIconDirs("system") or getFileIcons()
-                for _i, file in ipairs(file_icons) do
-                    local item = { type = "file", path = file.path, name = file.name, display_name = file.display_name, value = file.path }
-                    if mode == "system" then
-                        local override_icon = temp_overrides[file.name]
-                        item.is_overridden = override_icon ~= nil
-                        if override_icon then
-                            local override_path = getIconsDir() .. "/" .. override_icon
-                            if lfs.attributes(override_path, "mode") == "file" then item.override_path = override_path end
-                        end
-                    end
-                    icons_list[#icons_list + 1] = item
-                end
-            end
-        end
-        if sw > sh then cols, rows, frame_h = 9, 4, math.floor(sh * 0.85)
-        else cols, rows, frame_h = 7, 5, math.floor(sh * 0.70) end
-        per_page = cols * rows
-        h_gap, v_gap = Screen:scaleBySize(15), Screen:scaleBySize(15)
-        frame_w = math.floor(sw * 0.90)
-        content_w = frame_w - 2 * pad - 2 * brd
-        title_bar_h = Screen:scaleBySize(50)
-        button_bar_h = Screen:scaleBySize(50)
-        footer_h = Screen:scaleBySize(40)
-        cell_w = math.floor((content_w - (cols - 1) * h_gap) / cols)
-        local available_h = frame_h - pad - title_bar_h - button_bar_h - footer_h - pad
-        cell_h = math.max(44, math.floor((available_h - (rows - 1) * v_gap) / rows))
-        icon_sz = math.floor(cell_h * 0.55)
-        font_size = math.floor(icon_sz * 0.85)
-        cell_pad = math.max(4, math.floor(cell_h * 0.2))
-        grid_w = cols * cell_w + (cols - 1) * h_gap
-        grid_h = cell_h * rows + (rows - 1) * v_gap
-        frame_x = math.floor((sw - frame_w) / 2)
-        frame_y = math.max(0, math.floor((sh - frame_h) / 2))
-        rebuildPicker()
-        if mode ~= "system" then
-            picker_cache[cache_key] = {
-                icons_list = icons_list,
-                page_widgets = page_widgets,
-                total_pages = total_pages,
-                sw = sw,
-                sh = sh,
-                frame_x = frame_x,
-                frame_y = frame_y,
-                frame_w = frame_w,
-                frame_h = frame_h,
-                content_w = content_w,
-                title_bar_h = title_bar_h,
-                button_bar_h = button_bar_h,
-                footer_h = footer_h,
-                cols = cols,
-                rows = rows,
-                per_page = per_page,
-                h_gap = h_gap,
-                v_gap = v_gap,
-                cell_w = cell_w,
-                cell_h = cell_h,
-                icon_sz = icon_sz,
-                font_size = font_size,
-                cell_pad = cell_pad,
-                grid_w = grid_w,
-                grid_h = grid_h,
-            }
-        end
-    end
-
-    -- 系统图标模式：重置全部 / 应用替换
-    local function countReplaced()
-        local n = 0
-        for _i, item in ipairs(icons_list) do
-            if temp_overrides[item.name] then n = n + 1 end
-        end
-        return n
-    end
-
-    local btn_row
-    if mode == "system" then
-        local function resetIcons()
-            if countReplaced() == 0 then
-                UIManager:show(InfoMessage:new{ text = _("没有已替换的图标需要重置"), timeout = 2 })
-                return
-            end
-            resetSystemTempOverrides()
-            setTable("qa_icon_overrides", {})
-            picker_cache = {}
-            UIManager:show(Notification:new{ text = _("已重置所有图标，重启后生效"), timeout = 2 })
-            askRestart()
-        end
-        local function applyIcons()
-            local n = countReplaced()
-            if n == 0 then
-                UIManager:show(InfoMessage:new{ text = _("没有已替换的图标需要应用"), timeout = 2 })
-                return
-            end
-            local overrides = getTable("qa_icon_overrides")
-            for k, _ in pairs(overrides) do overrides[k] = nil end
-            for k, v in pairs(temp_overrides) do if v then overrides[k] = v end end
-            setTable("qa_icon_overrides", overrides)
-            resetSystemTempOverrides()
-            picker_cache = {}
-            UIManager:show(Notification:new{ text = string.format(_("已应用 %d 个图标替换"), n), timeout = 2 })
-            askRestart()
-        end
-        btn_row = HorizontalGroup:new{
-            align = "center",
-            Button:new{ text = string.format(_("重置全部 (%d)"), countReplaced()), width = math.floor(content_w / 2) - 4, show_parent = nil, callback = resetIcons },
-            HorizontalSpan:new{ width = 8 },
-            Button:new{ text = string.format(_("应用替换 (%d)"), countReplaced()), width = math.floor(content_w / 2) - 4, show_parent = nil, callback = applyIcons },
-        }
-    else
-        local btn_width = math.floor(content_w / 4) - 5
-        local show_browse_btn = not filter or filter == "file"
-        btn_row = HorizontalGroup:new{
-            align = "center",
-            Button:new{
-                text = _("应用默认"),
-                width = btn_width,
-                show_parent = nil,
-                callback = function()
-                    UIManager:close(dialog)
-                    UIManager:setDirty("all", "full")
-                    if on_select then on_select(nil) end
-                end,
-            },
-            HorizontalSpan:new{ width = 8 },
-            Button:new{
-                text = "刷新↻",
-                width = btn_width,
-                show_parent = nil,
-                callback = function()
-                    clearFileIconsCache()
-                    UIManager:close(dialog)
-                    UIManager:setDirty("all", "full")
-                    showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
-                end,
-            },
-            HorizontalSpan:new{ width = 8 },
-            Button:new{
-                text = (filter == "file") and _("显示完整图标") or _("仅显示file图标"),
-                width = btn_width,
-                show_parent = nil,
-                callback = function()
-                    UIManager:close(dialog)
-                    UIManager:setDirty("all", "full")
-                    showIconPicker(on_select, saved_icon, (filter == "file") and nil or "file")
-                end,
-            },
-            (show_browse_btn and HorizontalSpan:new{ width = 8 } or nil),
-            (show_browse_btn and Button:new{
-                text = _("浏览文件"),
-                width = btn_width,
-                show_parent = nil,
-                callback = function()
-                    UIManager:close(dialog)
-                    UIManager:setDirty("all", "full")
-                    clearFileIconsCache()
-                    UIManager:show(IconBrowser:new{
-                        path = getIconsDir(),
-                        onConfirm = function(file_path)
-                            if on_select then on_select(file_path) end
-                        end,
-                    })
-                end,
-            } or nil),
-        }
-    end
-
-    local inner_frame = FrameContainer:new{
-        width = frame_w,
-        height = frame_h,
-        background = Blitbuffer.COLOR_WHITE,
-        bordersize = brd,
-        radius = Screen:scaleBySize(8),
-        padding = pad,
-        VerticalGroup:new{ align = "center" },
-    }
-
-    local PickerDlg = InputContainer:extend{}
-    function PickerDlg:init()
-        self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
-        self:registerTouchZones({
-            {
-                id = "picker_tap",
-                ges = "tap",
-                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-                handler = function(ges)
-                    local fd = inner_frame.dimen
-                    if not fd or not ges.pos:intersectWith(fd) then
-                        UIManager:close(self)
-                        UIManager:setDirty("all", "full")
-                        return true
-                    end
-                    local gx, gy = ges.pos.x, ges.pos.y
-                    local btn_hit = 80
-                    -- 左上角：返回（系统模式回到系统图标预览；其他模式重新选择当前图标）
-                    if gx >= frame_x + pad and gx < frame_x + pad + btn_hit
-                            and gy >= frame_y + pad and gy < frame_y + pad + btn_hit then
-                        UIManager:close(self)
-                        UIManager:setDirty("all", "full")
-                        if parent_mode == "system" then
-                            showIconPicker(nil, nil, nil, "system")
-                        elseif on_select then
-                            on_select(saved_icon)
-                        end
-                        return true
-                    end
-                    -- 右上角：筛选
-                    if gx >= frame_x + frame_w - pad - btn_hit and gx < frame_x + frame_w - pad
-                            and gy >= frame_y + pad and gy < frame_y + pad + btn_hit then
-                        showSearchDialog()
-                        return true
-                    end
-                    -- 底部按钮行
-                    local btn_y = frame_y + pad + title_bar_h
-                    if gy >= btn_y and gy < btn_y + button_bar_h then
-                        if mode == "system" then
-                            local bw = math.floor(content_w / 2) - 4
-                            local bx = frame_x + pad
-                            if gx >= bx and gx < bx + bw then
-                                UIManager:close(self)
-                                UIManager:setDirty("all", "full")
-                                resetIcons()
-                                return true
-                            elseif gx >= bx + bw + 8 and gx < bx + (bw + 8) * 2 then
-                                UIManager:close(self)
-                                UIManager:setDirty("all", "full")
-                                applyIcons()
-                                return true
-                            end
-                        else
-                            local bw = math.floor(content_w / 4) - 5
-                            local bx = frame_x + pad
-                            local idx = 0
-                            -- 四个按钮逐个命中检测
-                            for i = 0, 3 do
-                                if i == 3 and not (not filter or filter == "file") then break end
-                                local x0 = bx + (bw + 8) * i
-                                if gx >= x0 and gx < x0 + bw then
-                                    UIManager:close(self)
-                                    UIManager:setDirty("all", "full")
-                                    if i == 0 then
-                                        if on_select then on_select(nil) end
-                                    elseif i == 1 then
-                                        clearFileIconsCache()
-                                        showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
-                                    elseif i == 2 then
-                                        showIconPicker(on_select, saved_icon, (filter == "file") and nil or "file")
-                                    else
-                                        clearFileIconsCache()
-                                        UIManager:show(IconBrowser:new{
-                                            path = getIconsDir(),
-                                            onConfirm = function(file_path)
-                                                if on_select then on_select(file_path) end
-                                            end,
-                                        })
-                                    end
-                                    return true
-                                end
-                            end
-                        end
-                        return true
-                    end
-                    -- 页脚：上一页 / 下一页 / 跳页
-                    local bar_y = frame_y + pad + title_bar_h + button_bar_h + grid_h
-                    if gy >= bar_y and gy < bar_y + footer_h then
-                        local chev_w = 120
-                        if gx < frame_x + pad + chev_w then
-                            if cur_page > 1 then
-                                cur_page = cur_page - 1
-                                UIManager:setDirty(self, function() return "ui", self.dimen end)
-                            end
-                            return true
-                        elseif gx > frame_x + frame_w - pad - chev_w then
-                            if cur_page < total_pages then
-                                cur_page = cur_page + 1
-                                UIManager:setDirty(self, function() return "ui", self.dimen end)
-                            end
-                            return true
-                        else
-                            local dlg
-                            dlg = InputDialog:new{
-                                title = _("跳转到第几页"),
-                                input = tostring(cur_page),
-                                input_hint = string.format("1 - %d", total_pages),
-                                input_type = "number",
-                                buttons = {
-                                    {
-                                        {
-                                            text = _("取消"),
-                                            callback = function() UIManager:close(dlg) end,
-                                        },
-                                        {
-                                            text = _("跳转"),
-                                            is_enter_default = true,
-                                            callback = function()
-                                                local page = tonumber(dlg:getInputText())
-                                                if page and page >= 1 and page <= total_pages then
-                                                    cur_page = page
-                                                    UIManager:close(dlg)
-                                                    UIManager:setDirty(self, function() return "ui", self.dimen end)
-                                                else
-                                                    UIManager:show(InfoMessage:new{
-                                                        text = string.format(_("请输入 1 到 %d 之间的数字"), total_pages),
-                                                        timeout = 2,
-                                                    })
-                                                end
-                                            end,
-                                        },
-                                    }
-                                },
-                            }
-                            UIManager:show(dlg)
-                            pcall(function() dlg:onShowKeyboard() end)
-                            return true
-                        end
-                    end
-                    -- 网格：选中图标
-                    local grid_start_x = frame_x + pad + (content_w - grid_w) / 2
-                    local grid_y = frame_y + pad + title_bar_h + button_bar_h
-                    if gx >= grid_start_x and gx < grid_start_x + grid_w
-                            and gy >= grid_y and gy < grid_y + grid_h then
-                        local col = math.floor((gx - grid_start_x) / (cell_w + h_gap))
-                        local row = math.floor((gy - grid_y) / (cell_h + v_gap))
-                        local display_list = getDisplayList()
-                        local idx = (cur_page - 1) * per_page + row * cols + col + 1
-                        if idx >= 1 and idx <= #display_list then
-                            local selected_icon = display_list[idx]
-                            if mode == "system" then
-                                local system_icon_name = selected_icon.name
-                                local current = temp_overrides[system_icon_name]
-                                UIManager:close(self)
-                                UIManager:setDirty("all", "full")
-                                showIconPicker(
-                                    function(selected)
-                                        if selected == current then return end
-                                        if selected then
-                                            temp_overrides[system_icon_name] = selected:match("([^/]+)$") or selected
-                                        else
-                                            temp_overrides[system_icon_name] = nil
-                                        end
-                                        picker_cache = {}
-                                        showIconPicker(nil, nil, nil, "system")
-                                    end,
-                                    current,
-                                    "file",
-                                    nil,
-                                    "system"
-                                )
-                            else
-                                UIManager:close(self)
-                                UIManager:setDirty("all", "full")
-                                if on_select then on_select(selected_icon.value) end
-                            end
-                            return true
-                        end
-                    end
-                    return true
-                end,
-            },
-            {
-                id = "picker_swipe",
-                ges = "swipe",
-                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 1 },
-                handler = function(ges)
-                    local dir = ges.direction
-                    if dir == "west" then
-                        if cur_page < total_pages then
-                            cur_page = cur_page + 1
-                            UIManager:setDirty(self, function() return "ui", self.dimen end)
-                        end
-                    elseif dir == "east" then
-                        if cur_page > 1 then
-                            cur_page = cur_page - 1
-                            UIManager:setDirty(self, function() return "ui", self.dimen end)
-                        end
-                    else
-                        UIManager:close(self)
-                        UIManager:setDirty("all", "full")
-                        return true
-                    end
-                    return true
-                end,
-            },
-        })
-    end
-
-    function PickerDlg:paintTo(bb, x, y)
-        self.dimen.x, self.dimen.y = x, y
-        inner_frame.dimen = Geom:new{ x = frame_x, y = frame_y, w = frame_w, h = frame_h }
-        inner_frame:paintTo(bb, frame_x, frame_y)
-        local content_x, content_y = frame_x + pad, frame_y + pad
-        local title_text
-        if mode == "system" then title_text = _("系统图标预览")
-        elseif filter == "file" then title_text = _("选择图标文件")
-        else title_text = _("选择图标") end
-        if filter_keyword ~= "" then title_text = title_text .. " [" .. _("筛选") .. ": \"" .. filter_keyword .. "\"]" end
-        local title_tw = TextWidget:new{ text = title_text, face = Font:getFace("smallinfofont"), bold = true }
-        title_tw:paintTo(bb, content_x + (content_w - title_tw:getSize().w) / 2, content_y + 12)
-        local back_tw = TextWidget:new{ text = "↶", face = Font:getFace("cfont", 24), fgcolor = Blitbuffer.COLOR_BLACK }
-        back_tw:paintTo(bb, content_x, content_y + 5)
-        local search_tw = TextWidget:new{ text = nerdIconChar("nerd:F002") or "?", face = Font:getFace("symbols", 22), fgcolor = Blitbuffer.COLOR_BLACK }
-        search_tw:paintTo(bb, content_x + content_w - 35, content_y + 5)
-        btn_row:paintTo(bb, content_x, content_y + title_bar_h)
-        local grid_start_x = content_x + (content_w - grid_w) / 2
-        local grid_start_y = content_y + title_bar_h + button_bar_h
-        local display_list = getDisplayList()
-        if #display_list == 0 then
-            local empty_tw = TextWidget:new{ text = _("没有匹配的图标"), face = Font:getFace("cfont"), fgcolor = Blitbuffer.COLOR_DARK_GRAY }
-            empty_tw:paintTo(bb, grid_start_x + (grid_w - empty_tw:getSize().w) / 2, grid_start_y + grid_h / 2 - 20)
-        else
-            page_widgets[cur_page]:paintTo(bb, grid_start_x, grid_start_y)
-        end
-        if total_pages > 1 then
-            local bar_y = grid_start_y + grid_h + (footer_h - 20) / 2
-            local left = TextWidget:new{ text = "◀", face = Font:getFace("cfont", 20), fgcolor = Blitbuffer.COLOR_BLACK }
-            left:paintTo(bb, content_x + 10, bar_y)
-            local right = TextWidget:new{ text = "▶", face = Font:getFace("cfont", 20), fgcolor = Blitbuffer.COLOR_BLACK }
-            right:paintTo(bb, frame_x + frame_w - pad - 50, bar_y)
-            local page_text = TextWidget:new{ text = string.format("%d / %d", cur_page, total_pages), face = Font:getFace("cfont", 14), fgcolor = Blitbuffer.gray(0.5) }
-            page_text:paintTo(bb, frame_x + (frame_w - page_text:getSize().w) / 2, bar_y)
-        end
-    end
-
-    dialog = PickerDlg:new{}
-    UIManager:show(dialog, "full")
 end
 
 -- ============================================================
@@ -2218,20 +622,6 @@ local function getIconForAction(id)
         end
         return "nerd:ECA8"
     end
-    if id == "toggle_cloze_mode" then
-        local reader = require("apps/reader/readerui").instance
-        if reader and reader.highlight then
-            local annotations = reader.highlight.ui.annotation.annotations
-            if annotations then
-                for idx, item in ipairs(annotations) do
-                    if item.drawer and reader.highlight._temp_covered and reader.highlight._temp_covered[idx] then
-                        return "nerd:F070"
-                    end
-                end
-            end
-        end
-        return "nerd:F06E"
-    end
     local action = getAction(id)
     return action and action.icon or nil
 end
@@ -2430,7 +820,7 @@ registerAction("fontlist", "字体列表", "nerd:F031", false, "reader", functio
 end)
 
 registerAction("qa_settings", _("快捷操作设置"), "nerd:E73A", false, "common", function(ctx)
-    showSettingsMenu()
+    QC.showSettingsMenu()
 end)
 
 local function refreshPanelMenus()
@@ -2445,11 +835,11 @@ local function refreshPanelMenus()
 end
 
 registerAction("qa_new", _("新建快捷操作"), "nerd:F067", false, "common", function()
-    showCustomQADialog(nil, function() refreshPanelMenus() end)
+    QC.showCustomQADialog(nil, function() refreshPanelMenus() end)
 end)
 
 registerAction("ui_font_switch", _("切换UI字体"), "nerd:F30B", true, "common", function(ctx)
-    showUIFontSwitcher()
+    QC.showUIFontSwitcher()
 end)
 
 registerAction("qa_add_button", _("添加按钮"), "nerd:F055", false, "common", function()
@@ -2463,109 +853,7 @@ registerAction("qa_add_button", _("添加按钮"), "nerd:F055", false, "common",
             touch_menu = reader.menu.menu_container[1]
         end
     end
-    showAddButtonMenu(touch_menu)
-end)
-
-registerAction("fmcoversettings", _("封面视觉设置"), "nerd:E8C8", false, "filemanager", function()
-    local reader = require("apps/reader/readerui").instance
-    if reader then
-        UIManager:show(InfoMessage:new{ text = _("此功能仅在文件管理器中可用"), timeout = 2 })
-    else
-        UIManager:broadcastEvent(Event:new("FMCoverSettings"))
-    end
-end)
-
-registerAction("toggle_cloze_mode", _("遮盖模式"), "nerd:F040", false, "reader", function(ctx)
-    local reader = require("apps/reader/readerui").instance
-    if reader then
-        UIManager:broadcastEvent(Event:new("Toggleclozemode"))
-        if ctx and ctx.touch_menu then ctx.touch_menu:updateItems() end
-    else
-        UIManager:show(InfoMessage:new{ text = _("请先打开一本书"), timeout = 2 })
-    end
-end)
-
-registerAction("reading_insights", _("阅读统计"), "nerd:F073", false, "common", function(ctx)
-    UIManager:broadcastEvent(Event:new("ShowReadingInsightsPopup"))
-end)
-
-registerAction("filebrowserplus", _("FilebrowserPlus"), "nerd:F029", true, "common", function()
-    local fm, reader = getInstances()
-    local plugin = (fm and fm.filebrowserplus) or (reader and reader.filebrowserplus)
-    if plugin then
-        if plugin:isRunning() then plugin:stop() else plugin:start() end
-    else
-        UIManager:show(InfoMessage:new{
-            text = _("未找到filebrowserplus插件实例或方法，请检查插件是否已安装或者修改动作注册方法以适应更新后的插件"),
-            timeout = 2,
-        })
-    end
-end)
-
-registerAction("zlibrary_search", _("ZLibrary搜索"), "nerd:E76F", false, "common", function()
-    local fm, reader = getInstances()
-    local plugin = (fm and fm.zlibrary) or (reader and reader.zlibrary)
-    if plugin and plugin.onZlibrarySearch then
-        plugin:onZlibrarySearch()
-    else
-        UIManager:show(InfoMessage:new{
-            text = _("未找到zlibrary 插件实例或方法，请检查插件是否已安装或者修改动作注册方法以适应更新后的插件"),
-            timeout = 2,
-        })
-    end
-end)
-
-registerAction("cloudlibrary_autosync", _("CloudLibrary-省心同步"), "nerd:E33B", false, "common", function()
-    local fm, reader = getInstances()
-    local plugin = (fm and fm.CloudLibrary) or (reader and reader.CloudLibrary)
-    if plugin then
-        plugin:toggleAutoSyncQuick()
-    else
-        UIManager:show(InfoMessage:new{
-            text = _("未找到cloudLibrary 插件实例或方法，请检查插件是否已安装或者修改动作注册方法以适应更新后的插件"),
-            timeout = 2,
-        })
-    end
-end)
-
-registerAction("cloudlibrary_batch_download_books", _("CloudLibrary-批量下载/删除"), "nerd:F409", false, "common", function()
-    local fm, reader = getInstances()
-    local plugin = (fm and fm.CloudLibrary) or (reader and reader.CloudLibrary)
-    if plugin then
-        plugin:batchDownloadBooks()
-    else
-        UIManager:show(InfoMessage:new{
-            text = _("未找到cloudLibrary 插件实例或方法，请检查插件是否已安装或者修改动作注册方法以适应更新后的插件"),
-            timeout = 2,
-        })
-    end
-end)
-
-registerAction("cloudlibrary_settings", _("CloudLibrary-云库设置"), "nerd:E33D", false, "common", function()
-    local fm, reader = getInstances()
-    local plugin = (fm and fm.CloudLibrary) or (reader and reader.CloudLibrary)
-    if plugin then
-        if reader then plugin:onCloudLibrarySettingsReader() else plugin:onCloudLibrarySettingsFileManager() end
-    else
-        UIManager:show(InfoMessage:new{
-            text = _("未找到cloudLibrary 插件实例或方法，请检查插件是否已安装或者修改动作注册方法以适应更新后的插件"),
-            timeout = 2,
-        })
-    end
-end)
-
-registerAction("annotations_viewer", _("annotationsviewer"), "nerd:F040", false, "common", function()
-    local fm, reader = getInstances()
-    local has_plugin = (reader and reader.annotationsviewer) or (fm and fm.annotationsviewer)
-    if not has_plugin then
-        UIManager:show(InfoMessage:new{ text = _("annotationsviewer 插件未安装"), timeout = 2 })
-        return
-    end
-    if reader then
-        UIManager:broadcastEvent(Event:new("ShowCurrentBookAnnotations"))
-    else
-        UIManager:broadcastEvent(Event:new("ShowAllAnnotations"))
-    end
+    QC.showAddButtonMenu(touch_menu)
 end)
 
 -- ============================================================
@@ -2614,7 +902,7 @@ end
 local function getActionSymbol(id)
     if ACTION_ORDER then
         for _i, builtin_id in ipairs(ACTION_ORDER) do
-            if builtin_id == id then return (nerdIconChar("nerd:E002") or "○") .. " " end
+            if builtin_id == id then return (QC.nerdIconChar("nerd:E002") or "○") .. " " end
         end
     end
     local cfg = getTable("custom")[id]
@@ -2799,7 +1087,7 @@ local function deleteCustomQA(qa_id)
     setSetting("custom_list", new_list)
 end
 
-function removeFromPanel(action_id, touch_menu)
+function QC.removeFromPanel(action_id, touch_menu)
     local slots = getQASlots()
     local found = false
     local new_slots = {}
@@ -2908,7 +1196,7 @@ local VIEW_LABELS = {
 -- 图标按钮文本（Nerd 字符或文件名）
 local function iconButtonText(icon)
     if not icon then return _("图标: 默认（点击更改图标）") end
-    local nerd_char = nerdIconChar(icon)
+    local nerd_char = QC.nerdIconChar(icon)
     if nerd_char then
         return _("图标") .. ": " .. nerd_char .. " (" .. icon:match("nerd:(.+)") .. ")"
     end
@@ -3008,7 +1296,7 @@ local function showEditActionDialog(action_id, on_done)
         last_row[#last_row + 1] = { text = _("移除"), callback = function()
             grabLabel()
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-            removeFromPanel(action_id, nil)
+            QC.removeFromPanel(action_id, nil)
             if on_done then on_done() end
         end }
         if pos then
@@ -3020,7 +1308,7 @@ local function showEditActionDialog(action_id, on_done)
             end }
             last_row[#last_row + 1] = { text = pos .. "/" .. total, callback = function()
                 if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-                showArrangeDialog(touch_menu, nil, function()
+                QC.showArrangeDialog(touch_menu, nil, function()
                     if on_done then on_done() end
                 end)
             end }
@@ -3114,7 +1402,7 @@ local function getCustomItems(touch_menu)
                 text = getActionSymbol(id) .. cfg.label .. " [" .. getActionViewFinal(id) .. "]",
                 is_builtin = false,
                 on_edit = function()
-                    showCustomQADialog(id, function() refreshQuickPanel(touch_menu) end)
+                    QC.showCustomQADialog(id, function() refreshQuickPanel(touch_menu) end)
                 end,
                 on_delete = function()
                     deleteCustomQA(id)
@@ -3136,7 +1424,7 @@ end
 -- ============================================================
 -- 添加按钮菜单
 -- ============================================================
-function showAddButtonMenu(touch_menu, on_back)
+function QC.showAddButtonMenu(touch_menu, on_back)
     local current_dialog = nil
     local slots = getQASlots()
     local slot_set = {}
@@ -3157,7 +1445,7 @@ function showAddButtonMenu(touch_menu, on_back)
             background = Blitbuffer.COLOR_LIGHT_GRAY,
             callback = function()
                 UIManager:close(current_dialog)
-                showSettingsMenu(touch_menu)
+                QC.showSettingsMenu(touch_menu)
             end
         }}
         buttons[#buttons + 1] = {{
@@ -3175,7 +1463,7 @@ function showAddButtonMenu(touch_menu, on_back)
             background = Blitbuffer.COLOR_LIGHT_GRAY,
             callback = function()
                 UIManager:close(current_dialog)
-                showSettingsMenu(touch_menu)
+                QC.showSettingsMenu(touch_menu)
             end
         }}
         buttons[#buttons + 1] = {}
@@ -3187,7 +1475,7 @@ function showAddButtonMenu(touch_menu, on_back)
                 setBool(key, not getBool(key))
                 if touch_menu then touch_menu:updateItems() end
                 UIManager:close(current_dialog)
-                showAddButtonMenu(touch_menu, on_back)
+                QC.showAddButtonMenu(touch_menu, on_back)
             end,
         }}
     end
@@ -3229,7 +1517,7 @@ function showAddButtonMenu(touch_menu, on_back)
             saveQASlots(new_slots)
             if touch_menu then touch_menu:updateItems() end
             UIManager:close(current_dialog)
-            showAddButtonMenu(touch_menu, on_back)
+            QC.showAddButtonMenu(touch_menu, on_back)
         end,
     }}
     buttons[#buttons + 1] = {}
@@ -3260,7 +1548,7 @@ function showAddButtonMenu(touch_menu, on_back)
                 end
                 if touch_menu then touch_menu:updateItems() end
                 UIManager:close(current_dialog)
-                showAddButtonMenu(touch_menu, on_back)
+                QC.showAddButtonMenu(touch_menu, on_back)
             end,
         }}
     end
@@ -3279,7 +1567,7 @@ end
 -- ============================================================
 -- 界面过滤设置菜单
 -- ============================================================
-function showInterfaceFilterMenu(touch_menu)
+function QC.showInterfaceFilterMenu(touch_menu)
     local function buildDedicatedListItems(mode)
         local target_view = (mode == "fm") and "filemanager" or "reader"
         local items = {}
@@ -3412,7 +1700,7 @@ end
 -- ============================================================
 -- 自定义动作编辑对话框
 -- ============================================================
-function showCustomQADialog(qa_id, on_done)
+function QC.showCustomQADialog(qa_id, on_done)
     local collections = getCollectionsList()
     table.sort(collections, function(a, b) return a:lower() < b:lower() end)
 
@@ -3956,7 +2244,7 @@ function showCustomQADialog(qa_id, on_done)
             end }
             last_row[#last_row + 1] = { text = pos .. "/" .. total, callback = function()
                 if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-                showArrangeDialog(touch_menu, nil, function()
+                QC.showArrangeDialog(touch_menu, nil, function()
                     if on_done then on_done() end
                 end)
             end }
@@ -3970,7 +2258,7 @@ function showCustomQADialog(qa_id, on_done)
         last_row[#last_row + 1] = { text = _("移除"), callback = function()
             grabLabel()
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-            removeFromPanel(qa_id, nil)
+            QC.removeFromPanel(qa_id, nil)
             if on_done then on_done() end
         end }
         last_row[#last_row + 1] = { text = _("保存"), is_enter_default = true, callback = function()
@@ -4071,7 +2359,7 @@ function showCustomQADialog(qa_id, on_done)
                     if sub_dialog then UIManager:close(sub_dialog); sub_dialog = nil end
                     if disp_picker then UIManager:close(disp_picker); disp_picker = nil end
                     closeSettingsDialog()
-                    showSettingsMenu(touch_menu)
+                    QC.showSettingsMenu(touch_menu)
                 end }}
                 action_buttons[#action_buttons + 1] = {{ text = "◂◂ " .. _("返回编辑框"), callback = function()
                     if sub_dialog then UIManager:close(sub_dialog); sub_dialog = nil end
@@ -4132,7 +2420,7 @@ function showCustomQADialog(qa_id, on_done)
                                 buildSaveDialog = buildSaveDialog,
                                 openDispatcherPicker = openDispatcherPicker,
                                 closeSettingsDialog = closeSettingsDialog,
-                                showSettingsMenu = showSettingsMenu,
+                                showSettingsMenu = QC.showSettingsMenu,
                                 set = {
                                     action_type = function(v) current_action_type = v end,
                                     action_val1 = function(v) current_action_val1 = v end,
@@ -4167,7 +2455,7 @@ function showCustomQADialog(qa_id, on_done)
         final_buttons[#final_buttons + 1] = {{ text = "⚙️ " .. _("打开主菜单"), callback = function()
             if disp_picker then UIManager:close(disp_picker); disp_picker = nil end
             closeSettingsDialog()
-            showSettingsMenu(touch_menu)
+            QC.showSettingsMenu(touch_menu)
         end }}
         final_buttons[#final_buttons + 1] = {{ text = "◂◂ " .. _("返回编辑框"), callback = function()
             if disp_picker then UIManager:close(disp_picker); disp_picker = nil end
@@ -4193,39 +2481,39 @@ end
 
 -- ============================================================
 -- 快捷方式：勾选的动作列表（设置子菜单与手势菜单共用）
--- （顶层局部变量已达 Lua 上限，此处改用全局函数）
+-- （顶层局部变量已达 Lua 上限，此处原为全局函数，插件版挂在 QC 表上）
 -- ============================================================
-function getShortcuts()
+function QC.getShortcuts()
     local s = getSetting("qa_shortcuts")
     return type(s) == "table" and s or {}
 end
 
-function saveShortcuts(list) setSetting("qa_shortcuts", list) end
+function QC.saveShortcuts(list) setSetting("qa_shortcuts", list) end
 
-function isShortcut(id)
-    for _i, v in ipairs(getShortcuts()) do
+function QC.isShortcut(id)
+    for _i, v in ipairs(QC.getShortcuts()) do
         if v == id then return true end
     end
     return false
 end
 
-function toggleShortcut(id)
-    local list, found = getShortcuts(), false
+function QC.toggleShortcut(id)
+    local list, found = QC.getShortcuts(), false
     for i = #list, 1, -1 do
         if list[i] == id then table.remove(list, i); found = true end
     end
     if not found then list[#list + 1] = id end
-    saveShortcuts(list)
+    QC.saveShortcuts(list)
 end
 
 -- 设置内子菜单：列出已添加到快捷操作菜单的动作，勾选即去除
-function getShortcutMenuItems(touch_menu)
+function QC.getShortcutMenuItems(touch_menu)
     local items = {}
-    for _i, id in ipairs(getShortcuts()) do
+    for _i, id in ipairs(QC.getShortcuts()) do
         items[#items + 1] = {
             text = getLabelForAction(id),
-            checked_func = function() return isShortcut(id) end,
-            callback = function() toggleShortcut(id) end,
+            checked_func = function() return QC.isShortcut(id) end,
+            callback = function() QC.toggleShortcut(id) end,
         }
     end
     if #items == 0 then
@@ -4238,14 +2526,14 @@ function getShortcutMenuItems(touch_menu)
 end
 
 -- 手势唤出列表：无标题栏，运行后关闭
-function getShortcutActionItems(touch_menu)
+function QC.getShortcutActionItems(touch_menu)
     local current_view = "filemanager"
     if getBool("qa_context_filter") then
         local reader = require("apps/reader/readerui").instance
         current_view = (reader and not reader.tearing_down) and "reader" or "filemanager"
     end
     local items = {}
-    for _i, id in ipairs(getShortcuts()) do
+    for _i, id in ipairs(QC.getShortcuts()) do
         if getAction(id) and isActionVisible(id, current_view) then
             items[#items + 1] = {
                 text = getLabelForAction(id),
@@ -4271,9 +2559,8 @@ end
 -- 重置所有配置
 -- ============================================================
 local function resetAllSettings(touch_menu)
-    picker_cache = {}
-    cached_file_icons = nil
-    system_temp_overrides = nil
+    clearFileIconsCache()
+    resetSystemTempOverrides()
     local new_config = {}
     for k, v in pairs(DEFAULT_CONFIG) do
         if type(v) == "table" then
@@ -4301,7 +2588,7 @@ end
 -- ============================================================
 -- 排列按钮：QuickCenter 框样式（灰底标题栏 + 返回导航 + ▲▼ 调整顺序）
 -- ============================================================
-function showArrangeDialog(touch_menu, on_back, on_done)
+function QC.showArrangeDialog(touch_menu, on_back, on_done)
     local current_dialog = nil
     local slots = {}
     for _i, id in ipairs(getQASlots()) do slots[#slots + 1] = id end
@@ -4323,7 +2610,7 @@ function showArrangeDialog(touch_menu, on_back, on_done)
                     saveQASlots(slots)
                     if current_dialog then UIManager:close(current_dialog); current_dialog = nil end
                     if on_done then on_done() end
-                    showSettingsMenu(touch_menu)
+                    QC.showSettingsMenu(touch_menu)
                 end,
             }, {
                 text = "◂ " .. _("返回"),
@@ -4378,7 +2665,7 @@ end
 -- ============================================================
 -- 设置菜单（主入口）
 -- ============================================================
-function showSettingsMenu(touch_menu)
+function QC.showSettingsMenu(touch_menu)
     if not touch_menu then
         local fm = require("apps/filemanager/filemanager").instance
         touch_menu = fm and fm.menu and fm.menu.menu_container and fm.menu.menu_container[1]
@@ -4406,7 +2693,7 @@ function showSettingsMenu(touch_menu)
             close_on_click = true,
             callback = function()
                 closeSettingsDialog()
-                showCustomQADialog(nil, function() refreshQuickPanel(touch_menu) end)
+                QC.showCustomQADialog(nil, function() refreshQuickPanel(touch_menu) end)
             end,
         }
         local builtin_items, custom_items = {}, {}
@@ -4415,7 +2702,7 @@ function showSettingsMenu(touch_menu)
         end
         local function actionEntry(item)
             return {
-                text = function() return (isShortcut(item.id) and "☑ " or "☐ ") .. item.text end,
+                text = function() return (QC.isShortcut(item.id) and "☑ " or "☐ ") .. item.text end,
                 sub_item_table = {
                     {
                         text = "✎ " .. _("编辑动作"),
@@ -4427,8 +2714,8 @@ function showSettingsMenu(touch_menu)
                     },
                     {
                         text = _("添加到快捷操作菜单"),
-                        checked_func = function() return isShortcut(item.id) end,
-                        callback = function() toggleShortcut(item.id) end,
+                        checked_func = function() return QC.isShortcut(item.id) end,
+                        callback = function() QC.toggleShortcut(item.id) end,
                     },
                 },
             }
@@ -4479,7 +2766,7 @@ function showSettingsMenu(touch_menu)
                 if t == target then found = item; break end
             end
             if not found then
-                showSettingsMenu(touch_menu)
+                QC.showSettingsMenu(touch_menu)
                 return
             end
             local new_stack = {}
@@ -4518,7 +2805,7 @@ function showSettingsMenu(touch_menu)
             qa_slider_show_value = showSliderValue(),
             qa_slider_style = getSliderStyle(),
             qa_filter_initialized = getBool("qa_filter_initialized"),
-            qa_shortcuts = deepCopy(getShortcuts()),
+            qa_shortcuts = deepCopy(QC.getShortcuts()),
             qa_layout_enabled = getBool("qa_layout_enabled"),
             qa_layout_rows = getNumber("qa_layout_rows"),
             qa_layout_cols = getNumber("qa_layout_cols"),
@@ -4544,7 +2831,7 @@ function showSettingsMenu(touch_menu)
                 },
                 {
                     text = _("快捷操作菜单"),
-                    sub_item_table = function() return getShortcutMenuItems(touch_menu) end,
+                    sub_item_table = function() return QC.getShortcutMenuItems(touch_menu) end,
                 },
             },
         },
@@ -4556,7 +2843,7 @@ function showSettingsMenu(touch_menu)
                     close_on_click = true,
                     callback = function()
                         closeSettingsDialog()
-                        showArrangeDialog(touch_menu,
+                        QC.showArrangeDialog(touch_menu,
                             function() reopenSettingsAt(touch_menu, { "控制中心" }) end,
                             function() refreshQuickPanel(touch_menu) end)
                     end,
@@ -4569,7 +2856,7 @@ function showSettingsMenu(touch_menu)
                             close_on_click = true,
                             callback = function()
                                 closeSettingsDialog()
-                                showAddButtonMenu(touch_menu, function()
+                                QC.showAddButtonMenu(touch_menu, function()
                                     reopenSettingsAt(touch_menu, { "控制中心", "编辑按钮" })
                                 end)
                             end,
@@ -4639,7 +2926,7 @@ function showSettingsMenu(touch_menu)
                 },
                 {
                     text = _("界面过滤"),
-                    sub_item_table = function() return showInterfaceFilterMenu(touch_menu) end,
+                    sub_item_table = function() return QC.showInterfaceFilterMenu(touch_menu) end,
                 },
                 {
                     text = _("手势行为"),
@@ -4761,14 +3048,14 @@ function showSettingsMenu(touch_menu)
                                                         text = string.format(_("配置 \"%s\" 已保存"), name),
                                                         timeout = 2,
                                                     })
-                                                    showSettingsMenu(touch_menu)
+                                                    QC.showSettingsMenu(touch_menu)
                                                 end,
                                             },
                                             {
                                                 text = _("取消"),
                                                 callback = function()
                                                     if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-                                                    showSettingsMenu(touch_menu)
+                                                    QC.showSettingsMenu(touch_menu)
                                                 end,
                                             },
                                         },
@@ -4845,14 +3132,14 @@ function showSettingsMenu(touch_menu)
                                                                         end
                                                                         UIManager:close(active_dialog)
                                                                         active_dialog = nil
-                                                                        showSettingsMenu(touch_menu)
+                                                                        QC.showSettingsMenu(touch_menu)
                                                                     end,
                                                                 },
                                                                 {
                                                                     text = _("取消"),
                                                                     callback = function()
                                                                         if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-                                                                        showSettingsMenu(touch_menu)
+                                                                        QC.showSettingsMenu(touch_menu)
                                                                     end,
                                                                 },
                                                             },
@@ -4939,7 +3226,7 @@ function showSettingsMenu(touch_menu)
                             close_on_click = true,
                             callback = function()
                                 closeSettingsDialog()
-                                showUIFontSwitcher()
+                                QC.showUIFontSwitcher()
                             end,
                         },
                     },
@@ -5124,7 +3411,7 @@ local function buildQSPanel(touch_menu)
                                 end
                             end
                         end
-                        showCustomQADialog(action_id, function() refreshQuickPanel(touch_menu) end)
+                        QC.showCustomQADialog(action_id, function() refreshQuickPanel(touch_menu) end)
                         return true
                     end
                     return false
@@ -5429,7 +3716,7 @@ local function buildQSPanel(touch_menu)
     }
     function ic:onHoldPanel()
         if not settingsOnHold() then return false end
-        showSettingsMenu(touch_menu)
+        QC.showSettingsMenu(touch_menu)
         return true
     end
     return ic, refs
@@ -5552,22 +3839,10 @@ local function patchFileManagerMenu()
     end
     local orig_sut = FMMenu.setUpdateItemTable
     FMMenu.setUpdateItemTable = function(m_self)
-        local FileManagerMenuOrder = require("ui/elements/filemanager_menu_order")
-        if FileManagerMenuOrder.tools then
-            local already = false
-            for _i, v in ipairs(FileManagerMenuOrder.tools) do
-                if v == "qa_settings" then already = true; break end
-            end
-            if not already then
-                table.insert(FileManagerMenuOrder.tools, 1, "----------------------------")
-                table.insert(FileManagerMenuOrder.tools, 2, "qa_settings")
-            end
-        end
-        if not m_self.menu_items then m_self.menu_items = {} end
-        m_self.menu_items.qa_settings = {
-            text = _("快捷中心"),
-            callback = function() showSettingsMenu() end,
-        }
+        -- 修复 #3：不再向 FileManagerMenuOrder.tools / menu_items 注入 qa_settings 菜单项。
+        -- 菜单入口改由插件标准的 registerToMainMenu + addToMainMenu 提供（见 QuickCenter:init），
+        -- 随插件启用/禁用由 KOReader 原生管理，也无需再维护 *_menu_order 表。
+        -- 这里只保留面板标签注入与默认标签行为。
         orig_sut(m_self)
         injectPanelTab(m_self)
     end
@@ -5589,19 +3864,8 @@ local function patchReaderMenu()
     end
     local orig_sut = RMenu.setUpdateItemTable
     RMenu.setUpdateItemTable = function(m_self)
-        local ReaderMenuOrder = require("ui/elements/reader_menu_order")
-        if ReaderMenuOrder.tools then
-            local already = false
-            for _i, v in ipairs(ReaderMenuOrder.tools) do
-                if v == "qa_settings" then already = true; break end
-            end
-            if not already then table.insert(ReaderMenuOrder.tools, "qa_settings") end
-        end
-        if not m_self.menu_items then m_self.menu_items = {} end
-        m_self.menu_items.qa_settings = {
-            text = _("快捷中心"),
-            callback = function() showSettingsMenu() end,
-        }
+        -- 修复 #3：同 patchFileManagerMenu，菜单入口改由标准 addToMainMenu 提供，
+        -- 不再注入 ReaderMenuOrder.tools / menu_items.qa_settings；这里只做标签注入。
         orig_sut(m_self)
         injectPanelTab(m_self)
     end
@@ -5677,9 +3941,9 @@ end
 -- ============================================================
 -- 手势注册（三个 Dispatcher 动作，幂等注册）
 -- ============================================================
--- 全局函数（顶层局部变量已达 Lua 200 上限）
+-- 动作定义与注册原为全局（顶层局部变量已达 Lua 200 上限），插件版挂在 QC 表上，不写 _G
 -- 动作定义只构建一次，避免每次 Dispatcher:execute 都重建 3 个表
-QA_DISPATCHER_ACTIONS = {
+QC.QA_DISPATCHER_ACTIONS = {
     quick_actions_panel = {
         category = "none",
         event = "QuickActionsPanel",
@@ -5700,28 +3964,22 @@ QA_DISPATCHER_ACTIONS = {
     },
 }
 
-function registerQAGestureActions()
-    for name, def in pairs(QA_DISPATCHER_ACTIONS) do
+function QC.registerQAGestureActions()
+    for name, def in pairs(QC.QA_DISPATCHER_ACTIONS) do
         Dispatcher:registerAction(name, def)
     end
 end
 
 local function registerGestures()
-    registerQAGestureActions()
-    -- 兜底：手势执行依赖 Dispatcher.settingsList 里已注册动作，若因版本/时机缺失会静默失效。
-    -- 每次 Dispatcher:execute 前确保动作已注册（幂等，开销可忽略）。
-    if not Dispatcher._qa_execute_patched then
-        Dispatcher._qa_execute_patched = true
-        local orig_dispatcher_execute = Dispatcher.execute
-        function Dispatcher:execute(settings, exec_props)
-            registerQAGestureActions()
-            return orig_dispatcher_execute(self, settings, exec_props)
-        end
-    end
+    QC.registerQAGestureActions()
+    -- 修复 #1：删除原“每次 Dispatcher:execute 都重新注册动作”的 Dispatcher.execute 全局重写。
+    -- 动作注册在本插件加载（install → registerGestures）时完成一次即可：Dispatcher 动作表是
+    -- 进程内全局的，插件只会在 UI 初始化时被加载（先于任何手势管理/执行），不存在“时机缺失”。
+    -- 移除可避免与其它插件对 Dispatcher:execute 的包装产生顺序冲突，也省去每次执行的开销。
     local function addGestures(mod)
         if not mod or mod._qs_gesture_added then return end
         function mod:onQuickActionsShortcuts()
-            showMenu(getShortcutActionItems(), _("快捷方式"), nil, nil, nil, true)
+            showMenu(QC.getShortcutActionItems(), _("快捷方式"), nil, nil, nil, true)
             return true
         end
         function mod:onQuickActionsPanel()
@@ -5741,7 +3999,7 @@ local function registerGestures()
             return true
         end
         function mod:onQuickActionsSettings()
-            showSettingsMenu()
+            QC.showSettingsMenu()
             return true
         end
         mod._qs_gesture_added = true
@@ -5755,7 +4013,7 @@ end
 -- 修复：KOReader 的 UIManager:quit 直接丢弃窗口栈，不广播 FlushSettings，
 -- 导致手势等 LuaSettings 插件设置不落盘，重启后丢失。
 -- ============================================================
-function patchUIManagerQuit()
+function QC.patchUIManagerQuit()
     if UIManager._qa_quit_patched then return end
     UIManager._qa_quit_patched = true
     local orig_quit = UIManager.quit
@@ -5778,7 +4036,7 @@ local function install()
     patchFileManagerMenu()
     patchReaderMenu()
     registerGestures()
-    patchUIManagerQuit()
+    QC.patchUIManagerQuit()
     initDefaultDedicatedLists()
     patchIconWidget()
     logger.info("[QuickActions] 安装完成，配置路径:", getConfigPath())
@@ -5786,4 +4044,51 @@ end
 
 install()
 
-logger.info("[QuickActions] 加载完成")
+-- ============================================================
+-- 插件类封装：符合 KOReader PluginLoader 契约（frontend/pluginloader.lua）
+-- ============================================================
+-- 本 main.lua 只在插件「启用」时被 dofile；禁用后本文件不加载，上方全部注入
+-- （工具菜单入口、控制中心标签、手势动作、字体/图标补丁等）自然不生效，
+-- 无需手动撤销。插件类由 PluginLoader:createPluginInstance() 在每个 UI
+-- （FileManager / ReaderUI）初始化时实例化：plugin:new{ ui = ... }。
+local QuickCenter = require("ui/widget/container/widgetcontainer"):extend{
+    name = "quickcenter",     -- 插件名，须与目录名一致（插件管理器中启用/禁用）
+    is_doc_only = false,      -- 文件管理器与阅读器中都生效
+    -- 声明配置文件路径：插件管理器的对话框可据此提供「删除插件设置」选项
+    -- （仅当用户主动选择删除时 PluginLoader 才会删除该文件，平时不影响读写）
+    settings_file = getConfigPath(),
+}
+
+-- 生命周期 init()：UI 初始化框架在实例化后自动调用（self.ui 为当前界面实例，
+-- FileManager 与 ReaderUI 各会实例化一次本插件）。
+-- 面板标签/手势/字体/图标补丁仍由 install() 在模块级注入（幂等、惰性刷新）；
+-- 而「快捷中心」设置入口改用插件标准机制：registerToMainMenu + addToMainMenu，
+-- 修复 #3 —— 由 KOReader 原生把菜单项放进「工具」标签，插件禁用即自动消失，
+-- 无需再补丁 *_menu_order 顺序表（见 patchFileManagerMenu/patchReaderMenu）。
+function QuickCenter:init()
+    if self.ui and self.ui.menu and self.ui.menu.registerToMainMenu then
+        self.ui.menu:registerToMainMenu(self)
+    end
+end
+
+-- 标准插件菜单项：工具标签下的「快捷中心」（与面板等原有入口同名同义，
+-- 点击打开完整设置对话框 QC.showSettingsMenu）。
+function QuickCenter:addToMainMenu(menu_items)
+    -- sorting_hint="more_tools"：与其它第三方插件一致，把入口归入「工具」标签的
+    -- “More tools”子菜单（FM 与 Reader 的 *_menu_order 都包含 more_tools，
+    -- 无 hint 的项会被 MenuSorter 打上 “NEW:” 前缀丢进第一个标签，故必须指定）。
+    menu_items.quickcenter = {
+        text = _("快捷中心"),
+        sorting_hint = "more_tools",
+        callback = function() QC.showSettingsMenu() end,
+    }
+end
+
+-- KOReader 不会主动调用插件 onClose（见 PluginLoader）；本插件不持有需手动释放的
+-- 资源，核心改动均为模块级方法注入，随进程存在、随禁用+重启消失。留空即可。
+function QuickCenter:onClose()
+end
+
+logger.info("[QuickActions] 插件加载完成")
+
+return QuickCenter
