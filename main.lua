@@ -71,6 +71,21 @@ local function closeSettingsDialog()
     end
 end
 
+-- ============================================================
+-- 设置菜单「返回原位」机制
+-- 由设置菜单发起的子界面（编辑/录制/选择/Spin 等）结束时，应回到发起处所在的
+-- 同一子菜单层级（重建页面以刷新列表），而不是整个退出设置。
+-- showMenu 渲染每一层时把当前位置记录到 settings_return；settingsReturnToHere()
+-- 据此重建该层；settingsReturnSoon() 延迟一帧执行（保证发起界面先完全关闭）。
+-- ============================================================
+local settings_return = nil
+local settingsReturnToHere = nil -- 前向声明；定义在 showMenu 之后
+local function settingsReturnSoon()
+    UIManager:scheduleIn(0, function()
+        if settingsReturnToHere then settingsReturnToHere() end
+    end)
+end
+
 local function refreshQuickPanel(touch_menu)
     if touch_menu and touch_menu.updateItems then touch_menu:updateItems() end
 end
@@ -1173,6 +1188,17 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
             }}
         end
     end
+    -- 记录当前设置层：供子界面结束后 settingsReturnToHere 重建回这一层
+    -- 记录当前设置层的“标题路径”（从根逐级）；重建时从根重新求值各子菜单函数，
+    -- 保证返回后再进列表能看到刚保存的编辑（快照 items 无法刷新深层子表）
+    if parent_stack and #parent_stack > 0 then
+        local p = {}
+        for _k = 1, #parent_stack do p[#p + 1] = parent_stack[_k].title end
+        p[#p + 1] = title
+        settings_return = { path = p, root_items = root_items, touch_menu = touch_menu }
+    else
+        settings_return = { path = nil, root_items = root_items, touch_menu = touch_menu }
+    end
     _settings_dialog = ButtonDialog:new{
         title = nil, -- 标题已由灰色标题栏承担
         title_align = "center",
@@ -1181,6 +1207,51 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
         max_height = math.floor(Screen:getHeight() * 0.7),
     }
     UIManager:show(_settings_dialog)
+end
+
+-- 见顶部前向声明：设置菜单「返回原位」——按 showMenu 记录的当前层重建页面
+-- 按标题路径从根重建（每级子菜单表为函数时重新求值 → 内容始终最新）
+local function reopenSettingsPath(s)
+    local items = s.root_items
+    if type(items) ~= "table" then return false end
+    local title = _("快捷中心")
+    local stack = {}
+    for i = 1, #s.path do
+        local target = s.path[i]
+        local found = nil
+        for _j, item in ipairs(items) do
+            local t = item.text
+            if type(t) == "function" then t = t() end
+            if t == target then found = item; break end
+        end
+        if not found then return false end
+        local new_stack = {}
+        for _k, e in ipairs(stack) do new_stack[#new_stack + 1] = e end
+        new_stack[#new_stack + 1] = { items = items, title = title, parent_stack = stack }
+        stack = new_stack
+        items = found.sub_item_table
+        if type(items) == "function" then items = items() end
+        title = target
+    end
+    showMenu(items, title, stack, s.touch_menu, s.root_items)
+    return true
+end
+
+settingsReturnToHere = function()
+    local s = settings_return
+    closeSettingsDialog()
+    if not (s and s.root_items) then
+        QC.showSettingsMenu()
+        return
+    end
+    if s.path and #s.path > 0 then
+        if not reopenSettingsPath(s) then
+            -- 标题匹配失败（如文本变动）：兜底回根
+            showMenu(s.root_items, _("快捷中心"), nil, s.touch_menu, s.root_items)
+        end
+    else
+        showMenu(s.root_items, _("快捷中心"), nil, s.touch_menu, s.root_items)
+    end
 end
 
 -- ============================================================
@@ -1255,7 +1326,7 @@ local function moveSlot(id, dir)
     end
 end
 
-local function showEditActionDialog(action_id, on_done)
+local function showEditActionDialog(action_id, on_done, on_close)
     local action = getAction(action_id)
     if not action then return end
     local current_label = action.label
@@ -1286,6 +1357,7 @@ local function showEditActionDialog(action_id, on_done)
         local pos, total = getCurrentPosition()
         local last_row = { { text = _("取消"), callback = function()
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
+            if on_close then on_close() end
         end } }
         local function grabLabel()
             if active_dialog then
@@ -1298,6 +1370,7 @@ local function showEditActionDialog(action_id, on_done)
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
             QC.removeFromPanel(action_id, nil)
             if on_done then on_done() end
+            if on_close then on_close() end
         end }
         if pos then
             last_row[#last_row + 1] = { text = "◀", enabled = (pos > 1), callback = function()
@@ -1310,6 +1383,7 @@ local function showEditActionDialog(action_id, on_done)
                 if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
                 QC.showArrangeDialog(touch_menu, nil, function()
                     if on_done then on_done() end
+                    if on_close then on_close() end
                 end)
             end }
             last_row[#last_row + 1] = { text = "▶", enabled = (pos < total), callback = function()
@@ -1336,6 +1410,7 @@ local function showEditActionDialog(action_id, on_done)
             builtin_overrides[action_id].view = current_view
             setTable("builtin_overrides", builtin_overrides)
             if on_done then on_done() end
+            if on_close then on_close() end
         end }
         local buttons = {
             { { text = iconButtonText(current_icon), callback = function()
@@ -1363,6 +1438,7 @@ local function showEditActionDialog(action_id, on_done)
             tap_close_callback = function()
                 UIManager:close(active_dialog)
                 active_dialog = nil
+                if on_close then on_close() end
             end,
             buttons = buttons,
         }
@@ -1385,7 +1461,7 @@ local function getCustomItems(touch_menu)
                 text = getActionSymbol(id) .. getLabelForAction(id) .. " [" .. getActionViewFinal(id) .. "]",
                 is_builtin = true,
                 on_edit = function()
-                    showEditActionDialog(id, function() refreshQuickPanel(touch_menu) end)
+                    showEditActionDialog(id, function() refreshQuickPanel(touch_menu); settingsReturnSoon() end)
                 end,
                 on_delete = nil,
             }
@@ -1402,7 +1478,7 @@ local function getCustomItems(touch_menu)
                 text = getActionSymbol(id) .. cfg.label .. " [" .. getActionViewFinal(id) .. "]",
                 is_builtin = false,
                 on_edit = function()
-                    QC.showCustomQADialog(id, function() refreshQuickPanel(touch_menu) end)
+                    QC.showCustomQADialog(id, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
                 end,
                 on_delete = function()
                     deleteCustomQA(id)
@@ -1424,7 +1500,7 @@ end
 -- ============================================================
 -- 添加按钮菜单
 -- ============================================================
-function QC.showAddButtonMenu(touch_menu, on_back)
+function QC.showAddButtonMenu(touch_menu, on_back, on_done)
     local current_dialog = nil
     local slots = getQASlots()
     local slot_set = {}
@@ -1475,7 +1551,7 @@ function QC.showAddButtonMenu(touch_menu, on_back)
                 setBool(key, not getBool(key))
                 if touch_menu then touch_menu:updateItems() end
                 UIManager:close(current_dialog)
-                QC.showAddButtonMenu(touch_menu, on_back)
+                QC.showAddButtonMenu(touch_menu, on_back, on_done)
             end,
         }}
     end
@@ -1517,7 +1593,7 @@ function QC.showAddButtonMenu(touch_menu, on_back)
             saveQASlots(new_slots)
             if touch_menu then touch_menu:updateItems() end
             UIManager:close(current_dialog)
-            QC.showAddButtonMenu(touch_menu, on_back)
+            QC.showAddButtonMenu(touch_menu, on_back, on_done)
         end,
     }}
     buttons[#buttons + 1] = {}
@@ -1548,12 +1624,15 @@ function QC.showAddButtonMenu(touch_menu, on_back)
                 end
                 if touch_menu then touch_menu:updateItems() end
                 UIManager:close(current_dialog)
-                QC.showAddButtonMenu(touch_menu, on_back)
+                QC.showAddButtonMenu(touch_menu, on_back, on_done)
             end,
         }}
     end
     buttons[#buttons + 1] = {}
-    buttons[#buttons + 1] = {{ text = _("关闭"), callback = function() UIManager:close(current_dialog) end }}
+    buttons[#buttons + 1] = {{ text = _("关闭"), callback = function()
+        UIManager:close(current_dialog)
+        if on_done then on_done() end
+    end }}
     current_dialog = ButtonDialog:new{
         title = nil, -- 标题由灰底栏承担
         title_align = "center",
@@ -1700,7 +1779,7 @@ end
 -- ============================================================
 -- 自定义动作编辑对话框
 -- ============================================================
-function QC.showCustomQADialog(qa_id, on_done)
+function QC.showCustomQADialog(qa_id, on_done, on_close)
     local collections = getCollectionsList()
     table.sort(collections, function(a, b) return a:lower() < b:lower() end)
 
@@ -1903,6 +1982,7 @@ function QC.showCustomQADialog(qa_id, on_done)
     local function cancelActionPicker()
         if not current_action_type and not qa_id then
             if on_done then on_done() end
+            if on_close then on_close() end
         else
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
             buildSaveDialog(false)
@@ -2208,6 +2288,7 @@ function QC.showCustomQADialog(qa_id, on_done)
             UIManager:close(active_dialog)
             active_dialog = nil
             if not qa_id and not current_action_type then if on_done then on_done() end end
+            if on_close then on_close() end
         end } }
         local function grabLabel()
             if active_dialog then
@@ -2223,6 +2304,9 @@ function QC.showCustomQADialog(qa_id, on_done)
                     text = string.format(_("删除快捷操作 \"%s\"？"), existing_label),
                     ok_text = _("删除"),
                     cancel_text = _("取消"),
+                    cancel_callback = function()
+                        if on_close then on_close() end
+                    end,
                     ok_callback = function()
                         deleteCustomQA(qa_id)
                         local new_slots = {}
@@ -2231,6 +2315,7 @@ function QC.showCustomQADialog(qa_id, on_done)
                         end
                         saveQASlots(new_slots)
                         if on_done then on_done() end
+                        if on_close then on_close() end
                     end,
                 })
             end }
@@ -2246,6 +2331,7 @@ function QC.showCustomQADialog(qa_id, on_done)
                 if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
                 QC.showArrangeDialog(touch_menu, nil, function()
                     if on_done then on_done() end
+                    if on_close then on_close() end
                 end)
             end }
             last_row[#last_row + 1] = { text = "▶", enabled = (pos < total), callback = function()
@@ -2260,6 +2346,7 @@ function QC.showCustomQADialog(qa_id, on_done)
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
             QC.removeFromPanel(qa_id, nil)
             if on_done then on_done() end
+            if on_close then on_close() end
         end }
         last_row[#last_row + 1] = { text = _("保存"), is_enter_default = true, callback = function()
             local inputs = active_dialog:getFields()
@@ -2299,6 +2386,7 @@ function QC.showCustomQADialog(qa_id, on_done)
                 menu_path = current_action_val1
             end
             commitQA(final_label, path, collection, chosen_icon or default_icon, plugin_key, plugin_method, dispatcher_action, dispatcher_value, menu_path, current_view)
+            if on_close then on_close() end
         end }
         local buttons = {
             { { text = action_label, callback = function()
@@ -2324,6 +2412,7 @@ function QC.showCustomQADialog(qa_id, on_done)
                 UIManager:close(active_dialog)
                 active_dialog = nil
                 if not qa_id and not current_action_type then if on_done then on_done() end end
+                if on_close then on_close() end
             end,
             buttons = buttons,
         }
@@ -2588,10 +2677,18 @@ end
 -- ============================================================
 -- 排列按钮：QuickCenter 框样式（灰底标题栏 + 返回导航 + ▲▼ 调整顺序）
 -- ============================================================
-function QC.showArrangeDialog(touch_menu, on_back, on_done)
+-- 排列对话框：kind = "buttons"（面板按钮，默认）/ "shortcuts"（快捷操作菜单）
+function QC.showArrangeDialog(touch_menu, on_back, on_done, kind)
+    kind = kind or "buttons"
+    local is_shortcuts = kind == "shortcuts"
+    local list_title = is_shortcuts and _("排列快捷操作") or _("排列按钮")
     local current_dialog = nil
     local slots = {}
-    for _i, id in ipairs(getQASlots()) do slots[#slots + 1] = id end
+    for _i, id in ipairs(is_shortcuts and QC.getShortcuts() or getQASlots()) do slots[#slots + 1] = id end
+
+    local function saveList()
+        if is_shortcuts then QC.saveShortcuts(slots) else saveQASlots(slots) end
+    end
 
     local function finish()
         UIManager:close(current_dialog)
@@ -2601,25 +2698,23 @@ function QC.showArrangeDialog(touch_menu, on_back, on_done)
 
     local function rebuild()
         local buttons = {}
-        buttons[#buttons + 1] = {{ text = _("排列按钮"), background = Blitbuffer.COLOR_LIGHT_GRAY, callback = function() end }}
+        buttons[#buttons + 1] = {{ text = list_title, background = Blitbuffer.COLOR_LIGHT_GRAY, callback = function() end }}
         if on_back then
             buttons[#buttons + 1] = {{
                 text = "◂◂ " .. _("返回根菜单"),
                 background = Blitbuffer.COLOR_LIGHT_GRAY,
                 callback = function()
-                    saveQASlots(slots)
+                    saveList()
                     if current_dialog then UIManager:close(current_dialog); current_dialog = nil end
-                    if on_done then on_done() end
                     QC.showSettingsMenu(touch_menu)
                 end,
             }, {
                 text = "◂ " .. _("返回"),
                 background = Blitbuffer.COLOR_LIGHT_GRAY,
                 callback = function()
-                    saveQASlots(slots)
+                    saveList()
                     if current_dialog then UIManager:close(current_dialog); current_dialog = nil end
-                    if on_done then on_done() end
-                    on_back()
+                    if on_back then on_back() end
                 end,
             }}
             buttons[#buttons + 1] = {}
@@ -2632,21 +2727,21 @@ function QC.showArrangeDialog(touch_menu, on_back, on_done)
                 { text = "▲", width = move_w, callback = function()
                     if idx > 1 then
                         slots[idx], slots[idx - 1] = slots[idx - 1], slots[idx]
-                        saveQASlots(slots)
+                        saveList()
                         rebuild()
                     end
                 end },
                 { text = "▼", width = move_w, callback = function()
                     if idx < #slots then
                         slots[idx], slots[idx + 1] = slots[idx + 1], slots[idx]
-                        saveQASlots(slots)
+                        saveList()
                         rebuild()
                     end
                 end },
             }
         end
         buttons[#buttons + 1] = {{ text = _("完成"), callback = function()
-            saveQASlots(slots)
+            saveList()
             finish()
         end }}
         if current_dialog then UIManager:close(current_dialog) end
@@ -2693,7 +2788,7 @@ function QC.showSettingsMenu(touch_menu)
             close_on_click = true,
             callback = function()
                 closeSettingsDialog()
-                QC.showCustomQADialog(nil, function() refreshQuickPanel(touch_menu) end)
+                QC.showCustomQADialog(nil, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
             end,
         }
         local builtin_items, custom_items = {}, {}
@@ -2831,7 +2926,22 @@ function QC.showSettingsMenu(touch_menu)
                 },
                 {
                     text = _("快捷操作菜单"),
-                    sub_item_table = function() return QC.getShortcutMenuItems(touch_menu) end,
+                    sub_item_table = function()
+                        -- “返回”栏下第一个功能入口：排列快捷操作
+                        local shortcut_items = QC.getShortcutMenuItems(touch_menu)
+                        table.insert(shortcut_items, 1, {
+                            text = _("排列快捷操作") .. " ▸",
+                            close_on_click = true,
+                            callback = function()
+                                closeSettingsDialog()
+                                QC.showArrangeDialog(touch_menu,
+                                    function() settingsReturnSoon() end,
+                                    function() settingsReturnSoon() end,
+                                    "shortcuts")
+                            end,
+                        })
+                        return shortcut_items
+                    end,
                 },
             },
         },
@@ -2844,8 +2954,8 @@ function QC.showSettingsMenu(touch_menu)
                     callback = function()
                         closeSettingsDialog()
                         QC.showArrangeDialog(touch_menu,
-                            function() reopenSettingsAt(touch_menu, { "控制中心" }) end,
-                            function() refreshQuickPanel(touch_menu) end)
+                            function() settingsReturnSoon() end,
+                            function() refreshQuickPanel(touch_menu); settingsReturnSoon() end)
                     end,
                 },
                 {
@@ -2858,7 +2968,7 @@ function QC.showSettingsMenu(touch_menu)
                                 closeSettingsDialog()
                                 QC.showAddButtonMenu(touch_menu, function()
                                     reopenSettingsAt(touch_menu, { "控制中心", "编辑按钮" })
-                                end)
+                                end, function() settingsReturnSoon() end)
                             end,
                         },
                         {
@@ -2886,6 +2996,7 @@ function QC.showSettingsMenu(touch_menu)
                                             callback = function(spin)
                                                 setNumber("qa_layout_rows", spin.value)
                                                 refreshQuickPanel(touch_menu)
+                                                settingsReturnSoon()
                                             end,
                                         }
                                         UIManager:show(spin)
@@ -2906,6 +3017,7 @@ function QC.showSettingsMenu(touch_menu)
                                             callback = function(spin)
                                                 setNumber("qa_layout_cols", spin.value)
                                                 refreshQuickPanel(touch_menu)
+                                                settingsReturnSoon()
                                             end,
                                         }
                                         UIManager:show(spin)
@@ -2972,6 +3084,7 @@ function QC.showSettingsMenu(touch_menu)
                             callback = function(spin)
                                 setNumber("qa_button_size_pct", spin.value)
                                 refreshQuickPanel(touch_menu)
+                                settingsReturnSoon()
                             end,
                         }
                         UIManager:show(spin)
@@ -2992,6 +3105,7 @@ function QC.showSettingsMenu(touch_menu)
                             callback = function(spin)
                                 setNumber("qa_label_scale_pct", spin.value)
                                 refreshQuickPanel(touch_menu)
+                                settingsReturnSoon()
                             end,
                         }
                         UIManager:show(spin)
@@ -3016,7 +3130,7 @@ function QC.showSettingsMenu(touch_menu)
                             text = _("保存配置"),
                             close_on_click = true,
                             callback = function()
-                                closeSettingsDialog()
+                                -- 配置输入框叠层于设置菜单之上，取消/完成即回到设置
                                 local active_dialog = nil
                                 active_dialog = MultiInputDialog:new{
                                     title = _("保存配置"),
@@ -3048,14 +3162,12 @@ function QC.showSettingsMenu(touch_menu)
                                                         text = string.format(_("配置 \"%s\" 已保存"), name),
                                                         timeout = 2,
                                                     })
-                                                    QC.showSettingsMenu(touch_menu)
                                                 end,
                                             },
                                             {
                                                 text = _("取消"),
                                                 callback = function()
                                                     if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-                                                    QC.showSettingsMenu(touch_menu)
                                                 end,
                                             },
                                         },
@@ -3081,7 +3193,6 @@ function QC.showSettingsMenu(touch_menu)
                                     items[#items + 1] = {
                                         text = nm,
                                         hold_callback = function()
-                                            closeSettingsDialog()
                                             updateSavedConfig(nm)
                                             UIManager:show(Notification:new{
                                                 text = string.format(_("配置 \"%s\" 已更新为当前设置"), nm),
@@ -3093,7 +3204,6 @@ function QC.showSettingsMenu(touch_menu)
                                                 text = _("更新配置"),
                                                 close_on_click = true,
                                                 callback = function()
-                                                    closeSettingsDialog()
                                                     updateSavedConfig(nm)
                                                     UIManager:show(Notification:new{
                                                         text = string.format(_("配置 \"%s\" 已更新为当前设置"), nm),
@@ -3105,7 +3215,7 @@ function QC.showSettingsMenu(touch_menu)
                                                 text = _("重命名"),
                                                 close_on_click = true,
                                                 callback = function()
-                                                    closeSettingsDialog()
+                                                    -- 叠层于设置菜单之上
                                                     local active_dialog = nil
                                                     active_dialog = MultiInputDialog:new{
                                                         title = _("重命名配置"),
@@ -3132,14 +3242,12 @@ function QC.showSettingsMenu(touch_menu)
                                                                         end
                                                                         UIManager:close(active_dialog)
                                                                         active_dialog = nil
-                                                                        QC.showSettingsMenu(touch_menu)
                                                                     end,
                                                                 },
                                                                 {
                                                                     text = _("取消"),
                                                                     callback = function()
                                                                         if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-                                                                        QC.showSettingsMenu(touch_menu)
                                                                     end,
                                                                 },
                                                             },
@@ -3153,7 +3261,6 @@ function QC.showSettingsMenu(touch_menu)
                                                 text = _("删除"),
                                                 close_on_click = true,
                                                 callback = function()
-                                                    closeSettingsDialog()
                                                     UIManager:show(ConfirmBox:new{
                                                         text = string.format(_("删除配置 \"%s\"？"), nm),
                                                         ok_text = _("删除"),
@@ -3178,7 +3285,6 @@ function QC.showSettingsMenu(touch_menu)
                             text = _("重设配置"),
                             close_on_click = true,
                             callback = function()
-                                closeSettingsDialog()
                                 UIManager:show(ConfirmBox:new{
                                     text = _("重置所有设置到初始默认值？\n这将清除所有自定义动作及您保存的配置。"),
                                     ok_text = _("重置"),
@@ -3199,7 +3305,6 @@ function QC.showSettingsMenu(touch_menu)
                             text = function() return _("控制中心图标") .. ": controlcenter" end,
                             close_on_click = true,
                             callback = function()
-                                closeSettingsDialog()
                                 showIconPicker(
                                     function(file_path)
                                         if file_path then
@@ -3217,7 +3322,6 @@ function QC.showSettingsMenu(touch_menu)
                             text = _("系统图标替换"),
                             close_on_click = true,
                             callback = function()
-                                closeSettingsDialog()
                                 showIconPicker(nil, nil, nil, "system")
                             end,
                         },
@@ -3225,7 +3329,6 @@ function QC.showSettingsMenu(touch_menu)
                             text = _("UI字体切换"),
                             close_on_click = true,
                             callback = function()
-                                closeSettingsDialog()
                                 QC.showUIFontSwitcher()
                             end,
                         },
@@ -3733,17 +3836,37 @@ local _orig_onSwipe = TouchMenu.onSwipe
 local _orig_onPan = TouchMenu.onPan
 
 -- 面板滑动手势共用命中逻辑（with_buttons: 是否处理按钮点击）
+-- ============================================================
+-- 前光/色温滑块“防误触”新鲜期
+-- 从左上角下滑呼出控制中心时，落指位置常正好压在滑杆上，收尾的轻微拖动/点击会
+-- 误调前光与色温。方案：面板每次渲染（含菜单刚呼出、切换到面板标签）后的一小段
+-- 时间内忽略滑块输入，延迟约 SLIDER_ARM_DELAY 秒后自动恢复；期间按钮仍可点按。
+-- 用自增 epoch 使旧定时回调失效，连续刷新不会反复累积延迟。
+-- ============================================================
+local SLIDER_ARM_DELAY = 0.6
+local _qs_slider_armed = false
+local _qs_arm_epoch = 0
+local function qsArmSliders()
+    _qs_arm_epoch = _qs_arm_epoch + 1
+    local epoch = _qs_arm_epoch
+    _qs_slider_armed = false
+    UIManager:scheduleIn(SLIDER_ARM_DELAY, function()
+        if epoch == _qs_arm_epoch then _qs_slider_armed = true end
+    end)
+end
+
 local function _qsHandleTap(self, ges_ev, with_buttons)
     local refs = self._qs_refs
     if not (refs and self.item_table and self.item_table._qs_panel) then return false end
-    if refs.fl_hit_test then
+    -- 新鲜期内忽略滑块输入，避免呼出菜单时的误触（见 qsArmSliders）
+    if _qs_slider_armed and refs.fl_hit_test then
         local new_val = refs.fl_hit_test(ges_ev.pos)
         if new_val and refs.setBrightness then
             refs.setBrightness(new_val)
             return true
         end
     end
-    if refs.nl_slider and refs.nl_slider.dimen and ges_ev.pos:intersectWith(refs.nl_slider.dimen) then
+    if _qs_slider_armed and refs.nl_slider and refs.nl_slider.dimen and ges_ev.pos:intersectWith(refs.nl_slider.dimen) then
         local new_val = refs.nl_slider:getValueFromPosition(ges_ev.pos)
         if new_val and refs.setWarmth then
             refs.setWarmth(math.floor(new_val + 0.5))
@@ -3775,6 +3898,8 @@ function TouchMenu:updateItems(target_page, target_item_id)
     self.item_group[#self.item_group + 1] = self.bar
     self.layout[#self.layout + 1] = self.bar.icon_widgets
     local panel, refs = buildQSPanel(self)
+    -- 面板重新渲染/刚呼出/刚切到本标签时，重置滑块防误触新鲜期
+    qsArmSliders()
     self._qs_refs = refs
     self.item_group[#self.item_group + 1] = panel
     self.item_group[#self.item_group + 1] = self.footer_top_margin
@@ -4092,3 +4217,5 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
+
