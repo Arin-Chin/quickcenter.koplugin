@@ -1177,6 +1177,7 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
             buttons[#buttons + 1] = {{
                 text = (checked and "✓ " or "  ") .. display_text,
                 enabled = enabled,
+                hold_callback = item.hold_callback,
                 callback = function()
                     if item.callback then item.callback() end
                     closeSettingsDialog()
@@ -1193,7 +1194,11 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
     -- 保证返回后再进列表能看到刚保存的编辑（快照 items 无法刷新深层子表）
     if parent_stack and #parent_stack > 0 then
         local p = {}
-        for _k = 1, #parent_stack do p[#p + 1] = parent_stack[_k].title end
+        for _k = 1, #parent_stack do
+            -- 跳过根页的合成标题“快捷中心”（它不是可点击行，不能作为重入路径一级）
+            local pt = parent_stack[_k].title
+            if pt ~= _("快捷中心") then p[#p + 1] = pt end
+        end
         p[#p + 1] = title
         settings_return = { path = p, root_items = root_items, touch_menu = touch_menu }
     else
@@ -1461,7 +1466,7 @@ local function getCustomItems(touch_menu)
                 text = getActionSymbol(id) .. getLabelForAction(id) .. " [" .. getActionViewFinal(id) .. "]",
                 is_builtin = true,
                 on_edit = function()
-                    showEditActionDialog(id, function() refreshQuickPanel(touch_menu); settingsReturnSoon() end)
+                    showEditActionDialog(id, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
                 end,
                 on_delete = nil,
             }
@@ -1789,6 +1794,8 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
     local chosen_icon = cfg.icon
     local dlg_title = qa_id and _("编辑快捷操作") or _("新建快捷操作")
     local existing_label = cfg.label or ""
+    -- “快捷操作菜单”勾选：新建/编辑动作时是否加入快捷操作菜单（保存时同步）
+    local want_shortcut = (qa_id and QC.isShortcut(qa_id)) or false
 
     local current_action_type = nil
     local current_action_val1 = nil
@@ -1975,6 +1982,24 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
         if not qa_id then
             custom_list[#custom_list + 1] = final_id
             setSetting("custom_list", custom_list)
+        end
+        -- 同步“快捷操作菜单”勾选状态（新建/编辑保存后即时生效）
+        local sh_list = QC.getShortcuts()
+        if type(sh_list) ~= "table" then sh_list = {} end
+        local sh_idx = nil
+        for _i, sid in ipairs(sh_list) do
+            if sid == final_id then sh_idx = _i; break end
+        end
+        if want_shortcut then
+            if not sh_idx then
+                sh_list[#sh_list + 1] = final_id
+                QC.saveShortcuts(sh_list)
+            end
+        else
+            if sh_idx then
+                table.remove(sh_list, sh_idx)
+                QC.saveShortcuts(sh_list)
+            end
         end
         if on_done then on_done() end
     end
@@ -2259,7 +2284,11 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
         if sub_dialog then UIManager:close(sub_dialog); sub_dialog = nil end
         if choice_dialog then UIManager:close(choice_dialog); choice_dialog = nil end
         if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
-        if update_name_with_title and current_action_title then existing_label = current_action_title end
+        -- 名称自动命名规则：仅当名称栏仍为空时才用所选动作的默认名称填充；
+        -- 若用户已先输入名称（或已有名称），选择/更换动作时不再覆盖已输入内容。
+        if update_name_with_title and current_action_title and existing_label == "" then
+            existing_label = current_action_title
+        end
 
         local action_label = _("动作") .. ": "
         if current_action_type then action_label = action_label .. (current_action_title or "")
@@ -2402,6 +2431,10 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                     current_view = v
                     buildSaveDialog(false, true)
                 end, function() buildSaveDialog(false, true) end)
+            end } },
+            { { text = (want_shortcut and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
+                want_shortcut = not want_shortcut
+                buildSaveDialog(false, true) -- 重建刷新勾选显示
             end } },
             last_row,
         }
@@ -2603,6 +2636,15 @@ function QC.getShortcutMenuItems(touch_menu)
             text = getLabelForAction(id),
             checked_func = function() return QC.isShortcut(id) end,
             callback = function() QC.toggleShortcut(id) end,
+            -- 长按：打开该动作的编辑卡片（自定义 → 新建/编辑快捷操作；其余 → 编辑快捷操作）
+            hold_callback = function()
+                closeSettingsDialog()
+                if getTable("custom")[id] then
+                    QC.showCustomQADialog(id, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
+                else
+                    showEditActionDialog(id, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
+                end
+            end,
         }
     end
     if #items == 0 then
@@ -2723,7 +2765,28 @@ function QC.showArrangeDialog(touch_menu, on_back, on_done, kind)
             local idx = i
             local move_w = Screen:scaleBySize(44)
             buttons[#buttons + 1] = {
-                { text = tostring(idx) .. ". " .. getLabelForAction(slots[i]), callback = function() end },
+                { text = tostring(idx) .. ". " .. getLabelForAction(slots[i]), callback = function() end,
+                  -- 长按：弹出序号选择，快速移动到指定位置
+                  hold_callback = function()
+                      local count = #slots
+                      local spin = SpinWidget:new{
+                          title_text = string.format(_("移动到序号 (1-%d)"), count),
+                          value = idx,
+                          value_min = 1,
+                          value_max = count,
+                          value_step = 1,
+                          callback = function(spin_w)
+                              local target = math.max(1, math.min(count, math.floor(spin_w.value)))
+                              if target ~= idx and slots[idx] then
+                                  local moved = table.remove(slots, idx)
+                                  table.insert(slots, target, moved)
+                                  saveList()
+                                  rebuild()
+                              end
+                          end,
+                      }
+                      UIManager:show(spin)
+                  end },
                 { text = "▲", width = move_w, callback = function()
                     if idx > 1 then
                         slots[idx], slots[idx - 1] = slots[idx - 1], slots[idx]
