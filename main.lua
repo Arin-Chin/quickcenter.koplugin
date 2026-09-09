@@ -1171,25 +1171,28 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
         buttons[#buttons + 1] = {{ text = dialog_title, background = Blitbuffer.COLOR_LIGHT_GRAY, callback = function() end }}
     end
     if parent_stack and #parent_stack > 0 then
+        -- “返回根菜单/返回”放在同一行（如同排列对话框的导航样式）
+        local nav_row = {}
         if #parent_stack > 1 then
-            buttons[#buttons + 1] = {{
+            nav_row[#nav_row + 1] = {
                 text = "◂◂ " .. _("返回根菜单"),
                 background = Blitbuffer.COLOR_LIGHT_GRAY,
                 callback = function()
                     closeSettingsDialog()
                     showMenu(root_items, _("快捷中心"), nil, touch_menu, root_items)
-                end
-            }}
+                end,
+            }
         end
-        buttons[#buttons + 1] = {{
+        nav_row[#nav_row + 1] = {
             text = "◂ " .. _("返回"),
             background = Blitbuffer.COLOR_LIGHT_GRAY,
             callback = function()
                 local parent = parent_stack[#parent_stack]
                 closeSettingsDialog()
                 showMenu(parent.items, parent.title, parent.parent_stack, touch_menu, root_items)
-            end
-        }}
+            end,
+        }
+        buttons[#buttons + 1] = nav_row
         buttons[#buttons + 1] = {}
     end
     for i = 1, #items do
@@ -2947,7 +2950,7 @@ function QC.showSettingsMenu(touch_menu)
         else
             for _i, item in ipairs(custom_items) do existing_sub[#existing_sub + 1] = actionEntry(item) end
         end
-        sub_items[#sub_items + 1] = { text = _("已有操作"), sub_item_table = existing_sub }
+        sub_items[#sub_items + 1] = { text = _("自定义操作"), sub_item_table = existing_sub }
         return sub_items
     end
 
@@ -4338,6 +4341,7 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
 
 
 
