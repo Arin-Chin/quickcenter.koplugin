@@ -86,6 +86,49 @@ local function settingsReturnSoon()
     end)
 end
 
+-- MultiInputDialog 自建布局时丢掉了 InputDialog 的可移动容器且带 ignore_if_over
+-- （既不垂直居中也不可拖动）。这里按 InputDialog 标准结构重建：
+-- 全屏 CenterContainer（默认双轴居中）+ MovableContainer（可拖动/长按复位）。
+local function enableCardCenterDrag(dialog)
+    if not (dialog and dialog.dialog_frame) then return end
+    local ok, MovableContainer = pcall(require, "ui/widget/container/movablecontainer")
+    if not ok or not MovableContainer then return end
+    dialog.movable = MovableContainer:new{ dialog.dialog_frame }
+    dialog[1] = CenterContainer:new{
+        dimen = Geom:new{ w = Screen:getWidth(), h = Screen:getHeight() },
+        dialog.movable,
+    }
+end
+
+-- 标题栏手势保护：点击/长按落在卡片标题栏区域一律拦截并返回 true，
+-- 防止“点空白处/外部即关闭”的路径在标题栏上误触发（避免丢失未保存输入）。
+local function guardCardTitleTaps(dialog)
+    if not dialog then return end
+    local orig_onTap = dialog.onTap
+    -- 事件分发签名：onTap(self, arg, ges)——保持与原方法一致，避免 ges 错位为 nil
+    dialog.onTap = function(self, arg, ges)
+        local tb = self and self.title_bar
+        if tb and tb.dimen and ges and ges.pos and ges.pos:intersectWith(tb.dimen) then
+            return true -- 标题栏：屏蔽点击
+        end
+        if orig_onTap then return orig_onTap(self, arg, ges) end
+        return false
+    end
+end
+
+-- 全插件统一：凡本插件创建的 MultiInputDialog（新建/编辑快捷操作、保存配置、重命名等）
+-- 标题栏都加手势保护，点按标题栏不会触发“点空白处关闭”等行为。
+do
+    local _orig_multi_new = MultiInputDialog.new
+    MultiInputDialog.new = function(...)
+        local inst = _orig_multi_new(...)
+        guardCardTitleTaps(inst)
+        return inst
+    end
+end
+
+
+
 local function refreshQuickPanel(touch_menu)
     if touch_menu and touch_menu.updateItems then touch_menu:updateItems() end
 end
@@ -1250,13 +1293,18 @@ settingsReturnToHere = function()
         return
     end
     if s.path and #s.path > 0 then
-        if not reopenSettingsPath(s) then
-            -- 标题匹配失败（如文本变动）：兜底回根
-            showMenu(s.root_items, _("快捷中心"), nil, s.touch_menu, s.root_items)
+        -- 逐级回退：目标层被删除/改名等导致标题匹配失败时，逐级去掉最后一层重试，
+        -- 保证至少回到最近的可用父菜单，而不是直接跳到根菜单。
+        local path = s.path
+        while #path > 0 do
+            s.path = path
+            if reopenSettingsPath(s) then return end
+            local trimmed = {}
+            for i = 1, #path - 1 do trimmed[#trimmed + 1] = path[i] end
+            path = trimmed
         end
-    else
-        showMenu(s.root_items, _("快捷中心"), nil, s.touch_menu, s.root_items)
     end
+    showMenu(s.root_items, _("快捷中心"), nil, s.touch_menu, s.root_items)
 end
 
 -- ============================================================
@@ -1414,6 +1462,18 @@ local function showEditActionDialog(action_id, on_done, on_close)
             builtin_overrides[action_id].icon = current_icon
             builtin_overrides[action_id].view = current_view
             setTable("builtin_overrides", builtin_overrides)
+            -- “保存时自动添加到按钮”：勾选后保存即把该动作加入面板按钮（与自定义卡语义一致）
+            if getBool("qa_auto_add_to_panel") then
+                local cur_slots = getQASlots()
+                local already_slot = false
+                for _i, sid in ipairs(cur_slots) do
+                    if sid == action_id then already_slot = true; break end
+                end
+                if not already_slot and #cur_slots < MAX_SLOTS then
+                    cur_slots[#cur_slots + 1] = action_id
+                    saveQASlots(cur_slots)
+                end
+            end
             if on_done then on_done() end
             if on_close then on_close() end
         end }
@@ -1435,10 +1495,18 @@ local function showEditActionDialog(action_id, on_done, on_close)
                     rebuildDialog(true)
                 end, function() rebuildDialog(true) end)
             end } },
+            { { text = (QC.isShortcut(action_id) and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
+                QC.toggleShortcut(action_id)
+                rebuildDialog(true) -- 重建刷新勾选显示
+            end }, { text = (getBool("qa_auto_add_to_panel") and "✓ " or "  ") .. _("保存时自动添加到按钮"), callback = function()
+                setBool("qa_auto_add_to_panel", not getBool("qa_auto_add_to_panel"))
+                rebuildDialog(true) -- 重建刷新勾选显示
+            end } },
             last_row,
         }
         active_dialog = MultiInputDialog:new{
             title = _("编辑快捷操作"),
+            is_movable = true, -- 允许拖动（按住 0.3s 左右再移动；或快速滑动粘合移动）
             fields = fields,
             tap_close_callback = function()
                 UIManager:close(active_dialog)
@@ -1448,9 +1516,9 @@ local function showEditActionDialog(action_id, on_done, on_close)
             buttons = buttons,
         }
         UIManager:show(active_dialog)
-        if not no_keyboard then
-            pcall(function() active_dialog:onShowKeyboard() end)
-        end
+        -- 不自动弹键盘：点按名称输入框时才弹出（如需自动弹出可放开下行）
+        -- pcall(function() active_dialog:onShowKeyboard() end)
+        enableCardCenterDrag(active_dialog) -- 重建居中+可拖动布局（MultiInput 自建布局丢掉了这两者）
     end
 
     rebuildDialog()
@@ -2435,11 +2503,15 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
             { { text = (want_shortcut and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
                 want_shortcut = not want_shortcut
                 buildSaveDialog(false, true) -- 重建刷新勾选显示
+            end }, { text = (getBool("qa_auto_add_to_panel") and "✓ " or "  ") .. _("保存时自动添加到按钮"), callback = function()
+                setBool("qa_auto_add_to_panel", not getBool("qa_auto_add_to_panel"))
+                buildSaveDialog(false, true)
             end } },
             last_row,
         }
         active_dialog = MultiInputDialog:new{
             title = dlg_title,
+            is_movable = true, -- 允许拖动（按住 0.3s 左右再移动；或快速滑动粘合移动）
             fields = fields,
             tap_close_callback = function()
                 UIManager:close(active_dialog)
@@ -2450,10 +2522,9 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
             buttons = buttons,
         }
         UIManager:show(active_dialog)
-        -- no_keyboard：视图选择器关闭后重建不弹键盘（防 Enter 误触保存 / 视觉混淆）
-        if not no_keyboard then
-            pcall(function() active_dialog:onShowKeyboard() end)
-        end
+        -- 不自动弹键盘：点按名称输入框时才弹出（如需自动弹出可放开下行）
+        -- pcall(function() active_dialog:onShowKeyboard() end)
+        enableCardCenterDrag(active_dialog) -- 重建居中+可拖动布局（MultiInput 自建布局丢掉了这两者）
     end
 
     openDispatcherPicker = function(touch_menu)
@@ -2836,18 +2907,9 @@ function QC.showSettingsMenu(touch_menu)
     local function getCustomActionSubMenu()
         local items = getCustomItems(touch_menu)
         local sub_items = {}
-        local auto_add_key = "qa_auto_add_to_panel"
+        -- 原“保存时自动添加到按钮”开关已移入新建/编辑卡片（随保存提交时生效）
         sub_items[#sub_items + 1] = {
-            text = function()
-                return (getBool(auto_add_key) and "✓ " or "  ") .. _("保存时自动添加到按钮")
-            end,
-            callback = function()
-                setBool(auto_add_key, not getBool(auto_add_key))
-            end,
-            separator = true,
-        }
-        sub_items[#sub_items + 1] = {
-            text = "+ " .. _("新建操作"),
+            text = _("新建操作") .. "+",
             close_on_click = true,
             callback = function()
                 closeSettingsDialog()
@@ -2859,23 +2921,19 @@ function QC.showSettingsMenu(touch_menu)
             if item.is_builtin then builtin_items[#builtin_items + 1] = item else custom_items[#custom_items + 1] = item end
         end
         local function actionEntry(item)
+            -- 点按直接打开该动作的编辑卡片（不再经“编辑动作/添加到快捷操作菜单”子菜单）；
+            -- 长按可快速切换“快捷操作菜单”勾选（保存时随编辑卡片同步则更稳定）
             return {
                 text = function() return (QC.isShortcut(item.id) and "☑ " or "☐ ") .. item.text end,
-                sub_item_table = {
-                    {
-                        text = "✎ " .. _("编辑动作"),
-                        close_on_click = true,
-                        callback = function()
-                            closeSettingsDialog()
-                            item.on_edit()
-                        end,
-                    },
-                    {
-                        text = _("添加到快捷操作菜单"),
-                        checked_func = function() return QC.isShortcut(item.id) end,
-                        callback = function() QC.toggleShortcut(item.id) end,
-                    },
-                },
+                close_on_click = true,
+                callback = function()
+                    closeSettingsDialog()
+                    item.on_edit()
+                end,
+                hold_callback = function()
+                    QC.toggleShortcut(item.id)
+                    settingsReturnSoon() -- 重建当前页以刷新勾选标记
+                end,
             }
         end
         if #builtin_items > 0 then
@@ -4280,5 +4338,16 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
+
+
+
+
+
+
+
+
+
+
 
 
