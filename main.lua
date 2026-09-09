@@ -1409,7 +1409,7 @@ local function showEditActionDialog(action_id, on_done, on_close)
             end
             return _("界面") .. ": " .. VIEW_LABELS[current_view]
         end
-        local fields = { { description = _("名称"), text = current_label, hint = _("动作名称…") } }
+        local fields = { { text = current_label, hint = _("动作名称…") } }
         local pos, total = getCurrentPosition()
         local last_row = { { text = _("取消"), callback = function()
             if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
@@ -2372,7 +2372,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
             return _("界面") .. ": " .. VIEW_LABELS[current_view]
         end
 
-        local fields = { { description = _("名称"), text = existing_label, hint = _("动作名称…") } }
+        local fields = { { text = existing_label, hint = _("动作名称…") } }
 
         local function getCurrentPosition()
             if not qa_id then return nil, 0 end
@@ -4341,6 +4341,7 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
 
 
 
