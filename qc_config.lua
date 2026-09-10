@@ -216,6 +216,17 @@ return {
     getConfigPath = getConfigPath,
     saveConfig = saveConfig,
     loadConfig = loadConfig,
+    -- 强制重新从磁盘加载（丢弃内存缓存）
+    reloadConfig = function()
+        CONFIG_DATA = nil
+        return loadConfig()
+    end,
+    -- 以给定表整体替换当前配置并落盘（用于“重设配置”）
+    replaceConfig = function(new_table)
+        CONFIG_DATA = new_table
+        saveConfig()
+        return CONFIG_DATA
+    end,
     getSetting = getSetting, setSetting = setSetting,
     getBool = getBool, setBool = setBool,
     getString = getString, setString = setString,
@@ -229,3 +240,4 @@ return {
     buttonHoldEdit = buttonHoldEdit, settingsOnHold = settingsOnHold,
     getButtonSizePct = getButtonSizePct,
 }
+

@@ -80,6 +80,8 @@ end
 -- ============================================================
 local settings_return = nil
 local settingsReturnToHere = nil -- 前向声明；定义在 showMenu 之后
+-- 前向声明：下列 helper 定义在文件后部，供更早定义的对话框（编辑卡片等）引用
+local isPanelButton, actionStatusPrefix, setButtonMembership, pruneZombieButtonSlots
 local function settingsReturnSoon()
     UIManager:scheduleIn(0, function()
         if settingsReturnToHere then settingsReturnToHere() end
@@ -153,7 +155,7 @@ local qc_config = require("qc_config")
 local qc_scan = require("qc_scan")
 local qc_uifont = require("qc_uifont")
 local qc_icons = require("qc_icons")
-local CONFIG_PATH, CONFIG_DATA, DEFAULT_CONFIG, MAX_SLOTS = qc_config.CONFIG_PATH, qc_config.CONFIG_DATA, qc_config.DEFAULT_CONFIG, qc_config.MAX_SLOTS
+local DEFAULT_CONFIG, MAX_SLOTS = qc_config.DEFAULT_CONFIG, qc_config.MAX_SLOTS
 local getConfigPath, saveConfig, loadConfig = qc_config.getConfigPath, qc_config.saveConfig, qc_config.loadConfig
 local getSetting, setSetting = qc_config.getSetting, qc_config.setSetting
 local getBool, setBool = qc_config.getBool, qc_config.setBool
@@ -957,18 +959,6 @@ local function toggleDedicated(action_id, target_view)
     end
 end
 
-local function getActionSymbol(id)
-    if ACTION_ORDER then
-        for _i, builtin_id in ipairs(ACTION_ORDER) do
-            if builtin_id == id then return (QC.nerdIconChar("nerd:E002") or "○") .. " " end
-        end
-    end
-    local cfg = getTable("custom")[id]
-    local symbols = { menu = "⊚ ", dispatcher = "⊕ ", plugin = "⬡ ", collection = "⊞ ", folder = "◇ " }
-    if cfg and symbols[cfg.action_type] then return symbols[cfg.action_type] end
-    return "● "
-end
-
 local function getTypePriority(id)
     local cfg = getTable("custom")[id]
     local priority = { menu = 1, dispatcher = 2, plugin = 3, folder = 4, collection = 5 }
@@ -1131,8 +1121,7 @@ end
 -- 删除和移除
 -- ============================================================
 local function deleteCustomQA(qa_id)
-    CONFIG_DATA = nil
-    loadConfig()
+    qc_config.reloadConfig()
     local custom = getTable("custom")
     custom[qa_id] = nil
     setTable("custom", custom)
@@ -1195,14 +1184,13 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
         buttons[#buttons + 1] = nav_row
         buttons[#buttons + 1] = {}
     end
-    for i = 1, #items do
-        local item = items[i]
+    local function buildCell(item)
         local sub_table = item.sub_item_table
         if type(sub_table) == "function" then sub_table = sub_table() end
         if sub_table and type(sub_table) == "table" and #sub_table > 0 then
             local display_text = item.text
             if type(display_text) == "function" then display_text = display_text() end
-            buttons[#buttons + 1] = {{
+            return {
                 text = "  " .. display_text .. " ▸",
                 hold_callback = item.hold_callback,
                 callback = function()
@@ -1213,14 +1201,14 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
                     end
                     new_stack[#new_stack + 1] = { items = items, title = title, parent_stack = parent_stack }
                     showMenu(sub_table, display_text, new_stack, touch_menu, root_items)
-                end
-            }}
+                end,
+            }
         else
             local checked = item.checked_func and item.checked_func() or false
             local display_text = item.text
             if type(display_text) == "function" then display_text = display_text() end
             local enabled = (item.enabled == nil) or (type(item.enabled) == "function" and item.enabled()) or item.enabled
-            buttons[#buttons + 1] = {{
+            return {
                 text = (checked and "✓ " or "  ") .. display_text,
                 enabled = enabled,
                 hold_callback = item.hold_callback,
@@ -1231,8 +1219,19 @@ local function showMenu(items, title, parent_stack, touch_menu, root_items, no_t
                         refreshQuickPanel(touch_menu)
                         showMenu(items, title, parent_stack, touch_menu, root_items)
                     end
-                end
-            }}
+                end,
+            }
+        end
+    end
+    -- 支持 pair_with_next：相邻两项合并为同一行两格
+    local i = 1
+    while i <= #items do
+        if items[i].pair_with_next and items[i + 1] then
+            buttons[#buttons + 1] = { buildCell(items[i]), buildCell(items[i + 1]) }
+            i = i + 2
+        else
+            buttons[#buttons + 1] = { buildCell(items[i]) }
+            i = i + 1
         end
     end
     -- 记录当前设置层：供子界面结束后 settingsReturnToHere 重建回这一层
@@ -1389,6 +1388,7 @@ local function showEditActionDialog(action_id, on_done, on_close)
     local current_icon = action.icon
     local current_view = getActionViewFinal(action_id)
     local current_action_type = isMenuAction(action_id) and "menu" or nil
+    local want_button = isPanelButton(action_id) -- 是否已保存为按钮（卡片内可切换，保存时生效）
     local active_dialog = nil
 
     local function getCurrentPosition()
@@ -1465,18 +1465,8 @@ local function showEditActionDialog(action_id, on_done, on_close)
             builtin_overrides[action_id].icon = current_icon
             builtin_overrides[action_id].view = current_view
             setTable("builtin_overrides", builtin_overrides)
-            -- “保存时自动添加到按钮”：勾选后保存即把该动作加入面板按钮（与自定义卡语义一致）
-            if getBool("qa_auto_add_to_panel") then
-                local cur_slots = getQASlots()
-                local already_slot = false
-                for _i, sid in ipairs(cur_slots) do
-                    if sid == action_id then already_slot = true; break end
-                end
-                if not already_slot and #cur_slots < MAX_SLOTS then
-                    cur_slots[#cur_slots + 1] = action_id
-                    saveQASlots(cur_slots)
-                end
-            end
+            -- “添加到按钮”：按卡片内的勾选状态同步（默认不添加）
+            setButtonMembership(action_id, want_button)
             if on_done then on_done() end
             if on_close then on_close() end
         end }
@@ -1501,9 +1491,9 @@ local function showEditActionDialog(action_id, on_done, on_close)
             { { text = (QC.isShortcut(action_id) and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
                 QC.toggleShortcut(action_id)
                 rebuildDialog(true) -- 重建刷新勾选显示
-            end }, { text = (getBool("qa_auto_add_to_panel") and "✓ " or "  ") .. _("保存时自动添加到按钮"), callback = function()
-                setBool("qa_auto_add_to_panel", not getBool("qa_auto_add_to_panel"))
-                rebuildDialog(true) -- 重建刷新勾选显示
+            end }, { text = (want_button and "✓ " or "  ") .. (want_button and _("已添加到按钮") or _("添加到按钮")), callback = function()
+                want_button = not want_button
+                rebuildDialog(true) -- 重建刷新显示
             end } },
             last_row,
         }
@@ -1527,6 +1517,64 @@ local function showEditActionDialog(action_id, on_done, on_close)
     rebuildDialog()
 end
 
+-- 是否已作为按钮保存到控制中心面板（qa_slots）
+isPanelButton = function(id)
+    for _i, sid in ipairs(getQASlots()) do
+        if sid == id then return true end
+    end
+    return false
+end
+
+-- 列表状态前缀：≡ 已加入快捷操作菜单；⊚ 已添加为面板按钮
+actionStatusPrefix = function(id)
+    local p = ""
+    if QC.isShortcut(id) then p = p .. "≡ " end
+    if isPanelButton(id) then p = p .. "⊚ " end
+    return p
+end
+
+-- 统一增删面板按钮（含上限保护）
+setButtonMembership = function(id, on)
+    local slots = getQASlots()
+    local found = false
+    for _i, sid in ipairs(slots) do
+        if sid == id then found = true; break end
+    end
+    if on then
+        if found then return true end
+        if #slots >= MAX_SLOTS then
+            UIManager:show(InfoMessage:new{
+                text = string.format(_("按钮面板已满（最多 %d 个），无法添加。"), MAX_SLOTS),
+                timeout = 3,
+            })
+            return false
+        end
+        slots[#slots + 1] = id
+        saveQASlots(slots)
+        return true
+    else
+        if not found then return true end
+        local kept = {}
+        for _i, sid in ipairs(slots) do
+            if sid ~= id then kept[#kept + 1] = sid end
+        end
+        saveQASlots(kept)
+        return true
+    end
+end
+
+-- 清除已不存在动作的僵尸按钮（如被移除的内置动作）
+pruneZombieButtonSlots = function()
+    local slots = getQASlots()
+    local custom = getTable("custom")
+    local kept, changed = {}, false
+    for _i, id in ipairs(slots) do
+        if getAction(id) or custom[id] then kept[#kept + 1] = id else changed = true end
+    end
+    if changed then saveQASlots(kept) end
+    return changed
+end
+
 local function getCustomItems(touch_menu)
     local items = {}
     for i = 1, #ACTION_ORDER do
@@ -1534,7 +1582,7 @@ local function getCustomItems(touch_menu)
         if id then
             items[#items + 1] = {
                 id = id,
-                text = getActionSymbol(id) .. getLabelForAction(id) .. " [" .. getActionViewFinal(id) .. "]",
+                text = getLabelForAction(id) .. " [" .. getActionViewFinal(id) .. "]",
                 is_builtin = true,
                 on_edit = function()
                     showEditActionDialog(id, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
@@ -1551,7 +1599,7 @@ local function getCustomItems(touch_menu)
         if cfg then
             items[#items + 1] = {
                 id = id,
-                text = getActionSymbol(id) .. cfg.label .. " [" .. getActionViewFinal(id) .. "]",
+                text = cfg.label .. " [" .. getActionViewFinal(id) .. "]",
                 is_builtin = false,
                 on_edit = function()
                     QC.showCustomQADialog(id, function() refreshQuickPanel(touch_menu) end, function() settingsReturnSoon() end)
@@ -1675,7 +1723,7 @@ function QC.showAddButtonMenu(touch_menu, on_back, on_done)
     buttons[#buttons + 1] = {}
     for i = 1, #available do
         local action = available[i]
-        local display_text = (slot_set[action.id] and "✓ " or "  ") .. getActionSymbol(action.id) .. action.label .. " [" .. (action.view or "common") .. "]"
+        local display_text = (slot_set[action.id] and "✓ " or "  ") .. action.label .. " [" .. (action.view or "common") .. "]"
         buttons[#buttons + 1] = {{
             text = display_text,
             callback = function()
@@ -1775,7 +1823,7 @@ function QC.showInterfaceFilterMenu(touch_menu)
             items[#items + 1] = {
                 text = function()
                     local prefix = (getActionViewFinal(action_id) == target_view) and "✓ " or "  "
-                    local display = prefix .. getActionSymbol(action_id) .. getLabelForAction(action_id) .. " [" .. getActionViewFinal(action_id) .. "]"
+                    local display = prefix .. getLabelForAction(action_id) .. " [" .. getActionViewFinal(action_id) .. "]"
                     return is_locked and (display .. " (" .. _("锁定") .. ")") or display
                 end,
                 enabled = not is_locked,
@@ -1867,6 +1915,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
     local existing_label = cfg.label or ""
     -- “快捷操作菜单”勾选：新建/编辑动作时是否加入快捷操作菜单（保存时同步）
     local want_shortcut = (qa_id and QC.isShortcut(qa_id)) or false
+    local want_button = (qa_id and isPanelButton(qa_id)) or false -- 是否已保存为按钮（默认否）
 
     local current_action_type = nil
     local current_action_val1 = nil
@@ -2032,24 +2081,8 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
         end
         custom_tbl[final_id] = cfg_table
         setTable("custom", custom_tbl)
-        if getBool("qa_auto_add_to_panel") then
-            local slots = getQASlots()
-            local already_exists = false
-            for _i, sid in ipairs(slots) do
-                if sid == final_id then already_exists = true; break end
-            end
-            if not already_exists then
-                if #slots < MAX_SLOTS then
-                    slots[#slots + 1] = final_id
-                    saveQASlots(slots)
-                else
-                    UIManager:show(InfoMessage:new{
-                        text = string.format(_("按钮面板已满（最多 %d 个），无法自动添加。"), MAX_SLOTS),
-                        timeout = 3,
-                    })
-                end
-            end
-        end
+        -- “添加到按钮”：按卡片内的勾选状态同步（默认不添加）
+        setButtonMembership(final_id, want_button)
         if not qa_id then
             custom_list[#custom_list + 1] = final_id
             setSetting("custom_list", custom_list)
@@ -2506,8 +2539,8 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
             { { text = (want_shortcut and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
                 want_shortcut = not want_shortcut
                 buildSaveDialog(false, true) -- 重建刷新勾选显示
-            end }, { text = (getBool("qa_auto_add_to_panel") and "✓ " or "  ") .. _("保存时自动添加到按钮"), callback = function()
-                setBool("qa_auto_add_to_panel", not getBool("qa_auto_add_to_panel"))
+            end }, { text = (want_button and "✓ " or "  ") .. (want_button and _("已添加到按钮") or _("添加到按钮")), callback = function()
+                want_button = not want_button
                 buildSaveDialog(false, true)
             end } },
             last_row,
@@ -2775,12 +2808,7 @@ local function resetAllSettings(touch_menu)
             new_config[k] = v
         end
     end
-    local f = io.open(CONFIG_PATH, "w")
-    if f then
-        f:write("return " .. serializeTable(new_config))
-        f:close()
-    end
-    CONFIG_DATA = new_config
+    qc_config.replaceConfig(new_config)
     local fm = require("apps/filemanager/filemanager").instance
     local current_menu = fm and fm.menu and fm.menu.menu_container and fm.menu.menu_container[1] or nil
     if not current_menu then
@@ -2797,6 +2825,7 @@ end
 function QC.showArrangeDialog(touch_menu, on_back, on_done, kind)
     kind = kind or "buttons"
     local is_shortcuts = kind == "shortcuts"
+    if not is_shortcuts then pruneZombieButtonSlots() end -- 过滤僵尸按钮
     local list_title = is_shortcuts and _("排列快捷操作") or _("排列按钮")
     local current_dialog = nil
     local slots = {}
@@ -2927,15 +2956,11 @@ function QC.showSettingsMenu(touch_menu)
             -- 点按直接打开该动作的编辑卡片（不再经“编辑动作/添加到快捷操作菜单”子菜单）；
             -- 长按可快速切换“快捷操作菜单”勾选（保存时随编辑卡片同步则更稳定）
             return {
-                text = function() return (QC.isShortcut(item.id) and "☑ " or "☐ ") .. item.text end,
+                text = function() return actionStatusPrefix(item.id) .. item.text end,
                 close_on_click = true,
                 callback = function()
                     closeSettingsDialog()
                     item.on_edit()
-                end,
-                hold_callback = function()
-                    QC.toggleShortcut(item.id)
-                    settingsReturnSoon() -- 重建当前页以刷新勾选标记
                 end,
             }
         end
@@ -3040,6 +3065,22 @@ function QC.showSettingsMenu(touch_menu)
         setSetting("saved_configs", cfg2)
     end
 
+    -- 应用已保存的命名配置到当前设置（长按配置行）
+    local function applySavedConfig(nm)
+        local saved = getSetting("saved_configs")
+        local cfg2 = type(saved) == "table" and saved[nm] or nil
+        if type(cfg2) ~= "table" then return end
+        for k, v in pairs(cfg2) do
+            if type(v) == "table" then setTable(k, v) else setSetting(k, v) end
+        end
+        refreshQuickPanel(touch_menu)
+        UIManager:show(Notification:new{
+            text = string.format(_("已应用配置 \"%s\""), nm),
+            timeout = 2,
+        })
+        settingsReturnSoon()
+    end
+
     root_menu_items = {
         {
             text = _("快捷操作"),
@@ -3073,7 +3114,42 @@ function QC.showSettingsMenu(touch_menu)
             text = _("控制中心"),
             sub_item_table = {
                 {
+                    text = _("编辑按钮"),
+                    pair_with_next = true,
+                    sub_item_table = function()
+                        local slots = getQASlots()
+                        local items = {}
+                        if #slots == 0 then
+                            items[#items + 1] = { text = _("还没有保存为按钮的快捷操作，请在编辑卡片中选择“添加到按钮”"), enabled = false }
+                        end
+                        for _i, id in ipairs(slots) do
+                            local btn_id = id
+                            items[#items + 1] = {
+                                text = function() return getLabelForAction(btn_id) end,
+                                checked_func = function() return isPanelButton(btn_id) end,
+                                -- 点击/长按：关闭（从按钮中移除）；等同在编辑卡片中取消“已添加到按钮”
+                                callback = function()
+                                    setButtonMembership(btn_id, false)
+                                    refreshQuickPanel(touch_menu)
+                                    settingsReturnSoon()
+                                end,
+                                hold_callback = function()
+                                    setButtonMembership(btn_id, false)
+                                    refreshQuickPanel(touch_menu)
+                                    settingsReturnSoon()
+                                end,
+                            }
+                        end
+                        return items
+                    end,
+                },
+                {
+                    text = _("界面过滤"),
+                    sub_item_table = function() return QC.showInterfaceFilterMenu(touch_menu) end,
+                },
+                {
                     text = _("排列按钮") .. " ▸",
+                    pair_with_next = true,
                     close_on_click = true,
                     callback = function()
                         closeSettingsDialog()
@@ -3083,86 +3159,68 @@ function QC.showSettingsMenu(touch_menu)
                     end,
                 },
                 {
-                    text = _("编辑按钮"),
+                    text = _("按钮布局"),
                     sub_item_table = {
                         {
-                            text = _("添加按钮") .. " ▸",
-                            close_on_click = true,
+                            text = function() return (getBool("qa_layout_enabled") and "✓ " or "  ") .. _("启用按钮布局") end,
                             callback = function()
-                                closeSettingsDialog()
-                                QC.showAddButtonMenu(touch_menu, function()
-                                    reopenSettingsAt(touch_menu, { "控制中心", "编辑按钮" })
-                                end, function() settingsReturnSoon() end)
+                                setBool("qa_layout_enabled", not getBool("qa_layout_enabled"))
+                                refreshQuickPanel(touch_menu)
                             end,
                         },
                         {
-                            text = _("按钮布局"),
-                            sub_item_table = {
-                                {
-                                    text = function() return (getBool("qa_layout_enabled") and "✓ " or "  ") .. _("启用按钮布局") end,
-                                    callback = function()
-                                        setBool("qa_layout_enabled", not getBool("qa_layout_enabled"))
+                            text = function() return _("按钮行数") .. ": " .. getNumber("qa_layout_rows") end,
+                            close_on_click = true,
+                            callback = function()
+                                closeSettingsDialog()
+                                local spin = SpinWidget:new{
+                                    title_text = _("按钮行数"),
+                                    value = getNumber("qa_layout_rows"),
+                                    value_min = 1,
+                                    value_max = 6,
+                                    value_step = 1,
+                                    unit = _("行"),
+                                    callback = function(spin)
+                                        setNumber("qa_layout_rows", spin.value)
                                         refreshQuickPanel(touch_menu)
+                                        settingsReturnSoon()
                                     end,
-                                },
-                                {
-                                    text = function() return _("按钮行数") .. ": " .. getNumber("qa_layout_rows") end,
-                                    close_on_click = true,
-                                    callback = function()
-                                        closeSettingsDialog()
-                                        local spin = SpinWidget:new{
-                                            title_text = _("按钮行数"),
-                                            value = getNumber("qa_layout_rows"),
-                                            value_min = 1,
-                                            value_max = 6,
-                                            value_step = 1,
-                                            unit = _("行"),
-                                            callback = function(spin)
-                                                setNumber("qa_layout_rows", spin.value)
-                                                refreshQuickPanel(touch_menu)
-                                                settingsReturnSoon()
-                                            end,
-                                        }
-                                        UIManager:show(spin)
-                                    end,
-                                },
-                                {
-                                    text = function() return _("每行按钮数") .. ": " .. getNumber("qa_layout_cols") end,
-                                    close_on_click = true,
-                                    callback = function()
-                                        closeSettingsDialog()
-                                        local spin = SpinWidget:new{
-                                            title_text = _("每行按钮数"),
-                                            value = getNumber("qa_layout_cols"),
-                                            value_min = 1,
-                                            value_max = 12,
-                                            value_step = 1,
-                                            unit = _("个"),
-                                            callback = function(spin)
-                                                setNumber("qa_layout_cols", spin.value)
-                                                refreshQuickPanel(touch_menu)
-                                                settingsReturnSoon()
-                                            end,
-                                        }
-                                        UIManager:show(spin)
-                                    end,
-                                },
-                            },
+                                }
+                                UIManager:show(spin)
+                            end,
                         },
                         {
-                            text = _("按钮形状"),
-                            sub_item_table = getShapeSubMenu,
-                        },
-                        {
-                            text = _("按钮背景"),
-                            enabled = getShape() ~= "bare",
-                            sub_item_table = getBgSubMenu,
+                            text = function() return _("每行按钮数") .. ": " .. getNumber("qa_layout_cols") end,
+                            close_on_click = true,
+                            callback = function()
+                                closeSettingsDialog()
+                                local spin = SpinWidget:new{
+                                    title_text = _("每行按钮数"),
+                                    value = getNumber("qa_layout_cols"),
+                                    value_min = 1,
+                                    value_max = 12,
+                                    value_step = 1,
+                                    unit = _("个"),
+                                    callback = function(spin)
+                                        setNumber("qa_layout_cols", spin.value)
+                                        refreshQuickPanel(touch_menu)
+                                        settingsReturnSoon()
+                                    end,
+                                }
+                                UIManager:show(spin)
+                            end,
                         },
                     },
                 },
                 {
-                    text = _("界面过滤"),
-                    sub_item_table = function() return QC.showInterfaceFilterMenu(touch_menu) end,
+                    text = _("按钮形状"),
+                    pair_with_next = true,
+                    sub_item_table = getShapeSubMenu,
+                },
+                {
+                    text = _("按钮背景"),
+                    enabled = getShape() ~= "bare",
+                    sub_item_table = getBgSubMenu,
                 },
                 {
                     text = _("手势行为"),
@@ -3317,11 +3375,7 @@ function QC.showSettingsMenu(touch_menu)
                                     items[#items + 1] = {
                                         text = nm,
                                         hold_callback = function()
-                                            updateSavedConfig(nm)
-                                            UIManager:show(Notification:new{
-                                                text = string.format(_("配置 \"%s\" 已更新为当前设置"), nm),
-                                                timeout = 2,
-                                            })
+                                            applySavedConfig(nm)
                                         end,
                                         sub_item_table = {
                                             {
@@ -4288,6 +4342,7 @@ local function install()
     QC.patchUIManagerQuit()
     initDefaultDedicatedLists()
     patchIconWidget()
+    pruneZombieButtonSlots() -- 清理已不存在动作对应的僵尸按钮
     logger.info("[QuickActions] 安装完成，配置路径:", getConfigPath())
 end
 
@@ -4341,6 +4396,12 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
+
+
+
+
+
 
 
 
