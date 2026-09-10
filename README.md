@@ -1,4 +1,4 @@
-# QuickCenter.koplugin
+# quickcenter.koplugin
 
 > **Quick Actions + Control Center for KOReader — a fast, configurable, gesture-friendly shortcut hub.**
 
@@ -53,8 +53,9 @@ plugin is **enabled**, and it never writes to `_G`.
 | :--- | :--- |
 | **Custom actions** | 5 types: folder / collection / plugin / system (Dispatcher) / **recorded menu action** |
 | **Menu recording** | Record any menu path as a reusable action; its view is customizable when editing |
-| **Edit actions** | Add / rename / delete; existing custom actions are grouped under *Existing Actions*; check *Add to Shortcut Menu* to promote one to a shortcut |
-| **Shortcut menu** | Manage shortcuts (check/uncheck to remove); a gesture can open the runnable list without a title bar |
+| **Edit actions** | Add / rename / delete from the edit card; custom actions live under *Custom actions* while built-ins stay under *Built-in actions* |
+| **Status marks** | `≡` = included in the shortcut menu · `⊚` = saved as a Control Center button (shown before the name; managed via the edit card) |
+| **Shortcut menu** | Add/remove from the edit card toggle; a gesture can open the runnable list without a title bar |
 
 <table>
   <tr>
@@ -79,7 +80,7 @@ Reader), plus everything about its buttons.
 | :--- | :--- |
 | **Built-in actions** | Wi-Fi / night mode / rotate / screenshot (4 s) / continue reading / search / restart / quit / power / HTTP server / font list / switch UI font |
 | **Arrange buttons** | Reorder panel buttons with ▲ / ▼ (QuickCenter-style box, back navigation) |
-| **Add / remove buttons** | Checkbox list of available actions (QuickCenter-style box, back navigation) |
+| **Edit buttons** | List of actions currently saved as panel buttons; tap or hold a row to remove it (same as clearing *Added to buttons* in the edit card) |
 | **Button layout** | Auto (flow by panel width) / fixed grid (**rows × buttons per row**) |
 | **Interface filter** | Show / hide actions per context: Filemanager / Reader / Common |
 | **Button shape** | Round / Rounded square / Bare |
@@ -110,7 +111,7 @@ Settings are opened via the menu entry or the `qa_settings_action` gesture.
 | Function | Description |
 | :--- | :--- |
 | **Save config** | Store the current configuration as a **named preset** |
-| **Edit config** | Browse presets: **long-press to overwrite** with current settings, or open the submenu for update / rename / delete |
+| **Edit config** | Browse presets: **long-press to apply** that preset to the current settings; open the submenu for update / rename / delete |
 | **Reset config** | Restore factory defaults |
 
 > Presets can be saved, overwritten and restored at any time — handy for switching between
@@ -163,7 +164,7 @@ names is a silent no-op while disabled.
 ## 📁 File Structure
 
 ```
-QuickCenter.koplugin/            # repository root == plugin root
+quickcenter.koplugin/            # repository root == plugin root
 ├── main.lua                     # entry: plugin class & lifecycle, action registry,
 │                                #   panels/dialogs, TouchMenu patch installation
 ├── qc_config.lua                # config leaf module: defaults, serialize, atomic
@@ -221,6 +222,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 | Date | Version | Notes |
 | :--- | :--- | :--- |
+| 2026-09-10 | 1.2.0 | Action-type symbols removed — status prefixes `≡` (shortcut menu) / `⊚` (panel button) instead; explicit *Add to buttons* toggle on both action cards; stale button cleanup; Control Center menu restructured with two-per-row grouping and no *Add buttons* entry; *Edit buttons* lists and removes saved buttons; preset long-press applies the preset; crash fixes (helper forward declarations, config `reloadConfig` / `replaceConfig`) |
 | 2026-09-06 | 1.1.0 | Plugin form (first release of this repo): patch → plugin migration, modular split into `qc_*` leaf modules, standard menu entry (`addToMainMenu`), font-patch wrap-growth fix, removed `Dispatcher.execute` global rewrite, luacheck + unit tests |
 | 2026-08-24 | patch | Deep refactor & fixes of `2-quickcenter.lua`: size −17%, dispatcher/Nerd-Font caches O(n²) → O(n), 3 latent crash fixes, `pcall`-guarded action execution (historical, see patch-era commits) |
 
