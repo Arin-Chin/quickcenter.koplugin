@@ -222,6 +222,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 | Date | Version | Notes |
 | :--- | :--- | :--- |
+| 2026-09-10 | 1.2.2 | Fix: a manually chosen view is no longer overwritten when selecting an action type (folder/collection/plugin/patch/menu recording) or rebuilding the card |
 | 2026-09-10 | 1.2.1 | Fixes: plugin/patch actions with nested submenus now replay by index and fall back to the recorded title path, with clearer errors; the action name no longer reverts to the default when toggling *Shortcut menu* / *Added to buttons*; Control Center shows shape/background and button/label size as two-per-line rows |
 | 2026-09-10 | 1.2.0 | Action-type symbols removed — status prefixes `≡` (shortcut menu) / `⊚` (panel button) instead; explicit *Add to buttons* toggle on both action cards; stale button cleanup; Control Center menu restructured with two-per-row grouping and no *Add buttons* entry; *Edit buttons* lists and removes saved buttons; preset long-press applies the preset; crash fixes (helper forward declarations, config `reloadConfig` / `replaceConfig`) |
 | 2026-09-06 | 1.1.0 | Plugin form (first release of this repo): patch → plugin migration, modular split into `qc_*` leaf modules, standard menu entry (`addToMainMenu`), font-patch wrap-growth fix, removed `Dispatcher.execute` global rewrite, luacheck + unit tests |
@@ -245,4 +246,5 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 - **Author**: [Arin-Chin](https://github.com/Arin-Chin)
 - **License**: AGPL-3.0 — see [gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html)
+
 

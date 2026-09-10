@@ -4,7 +4,7 @@
 --
 -- 作者 Author : ArinChin
 -- 许可证 License : AGPL-3.0（与 KOReader 一致）
--- 版本 Version : 1.2.1（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
+-- 版本 Version : 1.2.2（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
 --
 -- 安装：把整个 quickcenter.koplugin/ 目录放入 koreader/plugins/，在「工具 → 插件管理」
 --       中启用（默认启用）后重启 KOReader。
@@ -1990,6 +1990,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
     local disp_picker = nil
     -- 菜单动作：默认取录制路径视图；若用户自定义过则取 cfg.view
     local current_view = cfg.view or "common"
+    local view_user_set = false -- 用户手动改过“界面”后，不再被动作类型默认值覆盖
 
     local buildSaveDialog
     local openActionPicker
@@ -2192,7 +2193,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                             current_action_type = "folder"
                             current_action_val1 = path
                             current_action_title = path:match("([^/]+)$") or path
-                            current_view = "filemanager"
+                            if not view_user_set then current_view = "filemanager" end
                             buildSaveDialog(true)
                         end,
                         onCancel = function() cancelActionPicker() end,
@@ -2211,7 +2212,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                             current_action_type = "collection"
                             current_action_val1 = _name
                             current_action_title = _name
-                            current_view = "filemanager"
+                            if not view_user_set then current_view = "filemanager" end
                             buildSaveDialog(true)
                         end }}
                     end
@@ -2281,7 +2282,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                                             current_action_val1 = plugin_key
                                             current_action_val2 = { type = "submenu", path_indices = full_indices, path_titles = full_titles }
                                             current_action_title = text
-                                            current_view = "common"
+                                            if not view_user_set then current_view = "common" end
                                             buildSaveDialog(true)
                                         end,
                                     }}
@@ -2315,7 +2316,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                                         current_action_val1 = p.key
                                         current_action_val2 = PluginScan.SENTINEL
                                         current_action_title = p.title
-                                        current_view = "common"
+                                        if not view_user_set then current_view = "common" end
                                         buildSaveDialog(true)
                                     end,
                                 }}
@@ -2343,7 +2344,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                                                     current_action_val1 = p.key
                                                     current_action_val2 = PluginScan.SENTINEL
                                                     current_action_title = p.title
-                                                    current_view = "common"
+                                                    if not view_user_set then current_view = "common" end
                                                     buildSaveDialog(true)
                                                 end,
                                             }}
@@ -2414,7 +2415,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                         current_action_type = "menu"
                         current_action_val1 = clean_record
                         current_action_title = clean_record.display_label
-                        current_view = view
+                        if not view_user_set then current_view = view end
                         buildSaveDialog(true)
                     end, function() cancelActionPicker() end)
                 end }},
@@ -2579,6 +2580,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                 if active_dialog then UIManager:close(active_dialog); active_dialog = nil end
                 showViewPickerDialog(current_view, function(v)
                     current_view = v
+                    view_user_set = true
                     buildSaveDialog(false, true)
                 end, function() buildSaveDialog(false, true) end)
             end } },
@@ -4445,6 +4447,8 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
+
 
 
 
