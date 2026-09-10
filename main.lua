@@ -4,7 +4,7 @@
 --
 -- 作者 Author : ArinChin
 -- 许可证 License : AGPL-3.0（与 KOReader 一致）
--- 版本 Version : 1.2.0（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
+-- 版本 Version : 1.2.1（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
 --
 -- 安装：把整个 quickcenter.koplugin/ 目录放入 koreader/plugins/，在「工具 → 插件管理」
 --       中启用（默认启用）后重启 KOReader。
@@ -274,32 +274,65 @@ local function executeCustomAction(cfg, ctx)
         end
     elseif atype == "plugin" and cfg.plugin_key then
         -- 子菜单：按路径索引执行
-        if cfg.plugin_method == "submenu" and cfg.plugin_path_indices then
+        if cfg.plugin_method == "submenu" then
+            -- 子菜单动作：优先按索引回放；索引失效时按标题路径回退；
+            -- 两者都失败才提示，避免 KoCloud 这类“顶层是子菜单、叶子才有 callback”的插件无法执行。
             local mod = live_plugin(cfg.plugin_key)
-            if mod and type(mod.addToMainMenu) == "function" then
-                local entry = probe_menu_entry(mod, cfg.plugin_key)
-                local current_items = entry and menuSubTable(entry) or nil
+            if not (mod and type(mod.addToMainMenu) == "function") then
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("找不到插件实例或菜单入口: %s"), tostring(cfg.plugin_key)),
+                    timeout = 3,
+                })
+                return
+            end
+            local entry = probe_menu_entry(mod, cfg.plugin_key)
+            local callback = nil
+            local function pickCallback(item)
+                if type(item) ~= "table" then return nil end
+                if type(item.callback_func) == "function" then
+                    local ok, res = pcall(item.callback_func)
+                    if ok and type(res) == "table" then item = res end
+                end
+                return type(item.callback) == "function" and item.callback or nil
+            end
+            if entry and cfg.plugin_path_indices then
+                local current_items = menuSubTable(entry)
                 local found_item = nil
-                if current_items then
-                    for i, idx in ipairs(cfg.plugin_path_indices) do
-                        if current_items and current_items[idx] then
-                            found_item = current_items[idx]
-                            if i < #cfg.plugin_path_indices then current_items = menuSubTable(found_item) end
-                        else
-                            found_item = nil
-                            break
-                        end
+                for i, idx in ipairs(cfg.plugin_path_indices) do
+                    if current_items and current_items[idx] then
+                        found_item = current_items[idx]
+                        if i < #cfg.plugin_path_indices then current_items = menuSubTable(found_item) end
+                    else
+                        found_item = nil
+                        break
                     end
                 end
-                if found_item and type(found_item.callback) == "function" then
-                    pcall(found_item.callback)
-                    closeTouchMenu(ctx)
-                else
-                    UIManager:show(InfoMessage:new{
-                        text = string.format(_("找不到插件菜单项 (索引: %s)"), table.concat(cfg.plugin_path_indices or {}, ", ")),
-                        timeout = 2,
-                    })
+                callback = pickCallback(found_item)
+            end
+            if not callback and entry and cfg.plugin_path_titles then
+                local current_items = menuSubTable(entry)
+                local found_item = nil
+                local ok = true
+                for _i, tname in ipairs(cfg.plugin_path_titles) do
+                    if not current_items then ok = false; break end
+                    local match = nil
+                    for _j, it in ipairs(current_items) do
+                        if entry_text(it) == tname then match = it; break end
+                    end
+                    if not match then ok = false; break end
+                    found_item = match
+                    current_items = menuSubTable(found_item)
                 end
+                if ok then callback = pickCallback(found_item) end
+            end
+            if callback then
+                pcall(callback)
+                closeTouchMenu(ctx)
+            else
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("插件菜单路径已失效，请重新创建该快捷操作: %s"), tostring(cfg.plugin_key)),
+                    timeout = 3,
+                })
             end
         elseif string.sub(cfg.plugin_key, 1, 6) == "patch_" then
             -- 补丁动作：遍历当前界面菜单项执行
@@ -322,10 +355,13 @@ local function executeCustomAction(cfg, ctx)
             if type(method) ~= "string" or method == "submenu" then method = PluginScan.SENTINEL end
             local resolve_func = PluginScan.resolve(cfg.plugin_key, method)
             if not resolve_func then
-                UIManager:show(InfoMessage:new{
-                    text = string.format(_("无法解析插件方法: %s.%s"), cfg.plugin_key, method),
-                    timeout = 2,
-                })
+                local hint
+                if method == PluginScan.SENTINEL then
+                    hint = string.format(_("插件「%s」的顶层入口没有可执行回调，请重新创建并展开其子菜单选择具体项（或改用“录制菜单动作”）"), tostring(cfg.plugin_key))
+                else
+                    hint = string.format(_("无法解析插件方法: %s.%s"), tostring(cfg.plugin_key), tostring(method))
+                end
+                UIManager:show(InfoMessage:new{ text = hint, timeout = 3 })
                 return
             end
             pcall(resolve_func)
@@ -1489,9 +1525,11 @@ local function showEditActionDialog(action_id, on_done, on_close)
                 end, function() rebuildDialog(true) end)
             end } },
             { { text = (QC.isShortcut(action_id) and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
+                grabLabel()
                 QC.toggleShortcut(action_id)
                 rebuildDialog(true) -- 重建刷新勾选显示
             end }, { text = (want_button and "✓ " or "  ") .. (want_button and _("已添加到按钮") or _("添加到按钮")), callback = function()
+                grabLabel()
                 want_button = not want_button
                 rebuildDialog(true) -- 重建刷新显示
             end } },
@@ -2070,6 +2108,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
             if dispatcher_value and type(dispatcher_value) == "table" and dispatcher_value.type == "submenu" then
                 cfg_table.plugin_method = "submenu"
                 cfg_table.plugin_path_indices = dispatcher_value.path_indices
+                cfg_table.plugin_path_titles = dispatcher_value.path_titles
             else
                 cfg_table.plugin_method = (type(plugin_method) == "string") and plugin_method or PluginScan.SENTINEL
             end
@@ -2197,8 +2236,9 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                     -- （否则闭包引用会解析为全局 nil，点“返回”崩溃）
                     local showPluginSubMenu
                     local showPluginList
-                    showPluginSubMenu = function(plugin_key, plugin_title, items, level, parent_indices)
+                    showPluginSubMenu = function(plugin_key, plugin_title, items, level, parent_indices, parent_titles)
                         parent_indices = parent_indices or {}
+                        parent_titles = parent_titles or {}
                         local buttons = {}
                         if level > 0 then
                             buttons[#buttons + 1] = {{ text = "◂ " .. _("返回"), callback = function()
@@ -2215,17 +2255,23 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                                     local new_indices = {}
                                     for _i, p in ipairs(parent_indices) do new_indices[#new_indices + 1] = p end
                                     new_indices[#new_indices + 1] = idx
+                                    local new_titles = {}
+                                    for _i, pt in ipairs(parent_titles) do new_titles[#new_titles + 1] = pt end
+                                    new_titles[#new_titles + 1] = text
                                     buttons[#buttons + 1] = {{
                                         text = text .. " ▸",
                                         callback = function()
                                             if plugin_picker then UIManager:close(plugin_picker); plugin_picker = nil end
-                                            showPluginSubMenu(plugin_key, plugin_title .. " → " .. text, sub, level + 1, new_indices)
+                                            showPluginSubMenu(plugin_key, plugin_title .. " → " .. text, sub, level + 1, new_indices, new_titles)
                                         end,
                                     }}
                                 elseif type(item.callback) == "function" then
                                     local full_indices = {}
                                     for _i, p in ipairs(parent_indices) do full_indices[#full_indices + 1] = p end
                                     full_indices[#full_indices + 1] = idx
+                                    local full_titles = {}
+                                    for _i, pt in ipairs(parent_titles) do full_titles[#full_titles + 1] = pt end
+                                    full_titles[#full_titles + 1] = text
                                     buttons[#buttons + 1] = {{
                                         text = text,
                                         callback = function()
@@ -2233,7 +2279,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                                             if choice_dialog then UIManager:close(choice_dialog); choice_dialog = nil end
                                             current_action_type = "plugin"
                                             current_action_val1 = plugin_key
-                                            current_action_val2 = { type = "submenu", path_indices = full_indices }
+                                            current_action_val2 = { type = "submenu", path_indices = full_indices, path_titles = full_titles }
                                             current_action_title = text
                                             current_view = "common"
                                             buildSaveDialog(true)
@@ -2284,7 +2330,7 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                                                 text = p.title .. " ▸",
                                                 callback = function()
                                                     if plugin_picker then UIManager:close(plugin_picker); plugin_picker = nil end
-                                                    showPluginSubMenu(p.key, p.title, sub, 1, {})
+                                                    showPluginSubMenu(p.key, p.title, sub, 1, {}, {})
                                                 end,
                                             }}
                                         elseif type(entry.callback) == "function" then
@@ -2537,9 +2583,11 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
                 end, function() buildSaveDialog(false, true) end)
             end } },
             { { text = (want_shortcut and "✓ " or "  ") .. _("快捷操作菜单"), callback = function()
+                grabLabel()
                 want_shortcut = not want_shortcut
                 buildSaveDialog(false, true) -- 重建刷新勾选显示
             end }, { text = (want_button and "✓ " or "  ") .. (want_button and _("已添加到按钮") or _("添加到按钮")), callback = function()
+                grabLabel()
                 want_button = not want_button
                 buildSaveDialog(false, true)
             end } },
@@ -3223,36 +3271,8 @@ function QC.showSettingsMenu(touch_menu)
                     sub_item_table = getBgSubMenu,
                 },
                 {
-                    text = _("手势行为"),
-                    sub_item_table = {
-                        {
-                            text = function() return (buttonHoldEdit() and "✓ " or "  ") .. _("长按按钮打开编辑框") end,
-                            callback = function()
-                                setBool("qa_button_hold_edit", not buttonHoldEdit())
-                                refreshQuickPanel(touch_menu)
-                            end,
-                        },
-                        {
-                            text = function() return (settingsOnHold() and "✓ " or "  ") .. _("长按控制中心面板打开设置") end,
-                            callback = function() setBool("qa_settings_on_hold", not settingsOnHold()) end,
-                        },
-                    },
-                },
-                {
-                    text = _("滑块样式"),
-                    sub_item_table = function()
-                        return {
-                            { text = _("线条"), radio = true, checked_func = function() return getSliderStyle() == "line" end, callback = function() setString("qa_slider_style", "line") end },
-                            { text = _("分段按钮"), radio = true, checked_func = function() return getSliderStyle() == "segment" end, callback = function() setString("qa_slider_style", "segment") end },
-                        }
-                    end,
-                },
-                {
-                    text = function() return (showLabels() and "✓ " or "  ") .. _("显示标签") end,
-                    callback = function() setBool("qa_labels", not showLabels()) end,
-                },
-                {
                     text = function() return _("按钮大小") .. ": " .. getButtonSizePct() .. "%" end,
+                    pair_with_next = true,
                     close_on_click = true,
                     callback = function()
                         closeSettingsDialog()
@@ -3292,6 +3312,35 @@ function QC.showSettingsMenu(touch_menu)
                         }
                         UIManager:show(spin)
                     end,
+                },
+                {
+                    text = _("手势行为"),
+                    sub_item_table = {
+                        {
+                            text = function() return (buttonHoldEdit() and "✓ " or "  ") .. _("长按按钮打开编辑框") end,
+                            callback = function()
+                                setBool("qa_button_hold_edit", not buttonHoldEdit())
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        {
+                            text = function() return (settingsOnHold() and "✓ " or "  ") .. _("长按控制中心面板打开设置") end,
+                            callback = function() setBool("qa_settings_on_hold", not settingsOnHold()) end,
+                        },
+                    },
+                },
+                {
+                    text = _("滑块样式"),
+                    sub_item_table = function()
+                        return {
+                            { text = _("线条"), radio = true, checked_func = function() return getSliderStyle() == "line" end, callback = function() setString("qa_slider_style", "line") end },
+                            { text = _("分段按钮"), radio = true, checked_func = function() return getSliderStyle() == "segment" end, callback = function() setString("qa_slider_style", "segment") end },
+                        }
+                    end,
+                },
+                {
+                    text = function() return (showLabels() and "✓ " or "  ") .. _("显示标签") end,
+                    callback = function() setBool("qa_labels", not showLabels()) end,
                 },
             },
         },
@@ -4396,6 +4445,11 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
+
+
+
+
 
 
 
