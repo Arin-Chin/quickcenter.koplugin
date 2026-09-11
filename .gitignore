@@ -1,6 +1,5 @@
 # Local/dev-only files — not part of the plugin runtime
 crash.log
 *.log
-pictures/
 .luacheckrc
 spec/
