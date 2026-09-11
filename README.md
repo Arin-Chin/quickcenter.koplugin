@@ -25,7 +25,7 @@ plugin is **enabled**, and it never writes to `_G`.
 
 | Step | Action |
 | :--- | :--- |
-| 1 | Clone this repo and copy its contents to `<koreader>/plugins/quickcenter.koplugin/` |
+| 1 | Download the runtime-only zip from **Releases**, or clone this repository, then copy the `quickcenter.koplugin` folder into `<koreader>/plugins/` |
 | 2 | KOReader → gear **Tools → Plugin manager → User plugins** → enable `QuickCenter` |
 | 3 | Restart KOReader |
 
@@ -172,9 +172,7 @@ quickcenter.koplugin/            # repository root == plugin root
 ├── qc_scan.lua                  # plugin/patch scanner leaf module (PluginScan)
 ├── qc_uifont.lua                # UI font switcher leaf module
 ├── qc_icons.lua                 # icons leaf module: Nerd Font, pickers, caches
-├── spec/                        # unit tests (qc_config) + dependency-free runner
 ├── _meta.lua                    # plugin metadata (shown when disabled)
-├── .luacheckrc                  # luacheck configuration
 ├── pictures/                    # screenshots (referenced by both READMEs)
 ├── README.md                    # documentation (English)
 └── README.zh_CN.md              # documentation (简体中文)
@@ -187,9 +185,11 @@ quickcenter.koplugin/            # repository root == plugin root
 | `qc_scan.lua` | Plugin/patch discovery & menu-item tree search |
 | `qc_uifont.lua` | Whole-UI font replacement & picker dialogs |
 | `qc_icons.lua` | Nerd Font glyphs, icon cache, file/system icon pickers |
-| `spec/` | Unit tests & runner (in-memory FS, no disk writes) |
 | `_meta.lua` | Plugin metadata for the Plugin manager |
+| `pictures/` | Screenshots referenced by the READMEs |
 | `README.md` / `README.zh_CN.md` | Bilingual docs (mirrored structure) |
+
+> `spec/` (config unit tests) and `.luacheckrc` are local development helpers and are intentionally not tracked in this repository; the release package contains runtime files only.
 
 ---
 
@@ -240,7 +240,17 @@ an existing file from the patch era is reused as-is — no migration needed).
 ## Developer Info
 
 - **Author**: [Arin-Chin](https://github.com/Arin-Chin)
+- **Repository**: [Arin-Chin/quickcenter.koplugin](https://github.com/Arin-Chin/quickcenter.koplugin)
+- **Releases**: runtime-only zip packages are published under [Releases](https://github.com/Arin-Chin/quickcenter.koplugin/releases)
 - **License**: AGPL-3.0 — see [gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html)
+
+Local development (helpers kept in a working copy, not tracked here):
+
+```bash
+luacheck .                       # static checks (luarocks install luacheck)
+busted spec/qc_config_spec.lua   # unit tests (busted)
+node spec/run_spec.js            # unit tests (Node + fengari)
+```
 
 
 

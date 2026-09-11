@@ -22,7 +22,7 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 
 | 步骤 | 操作 |
 | :--- | :--- |
-| 1 | 克隆本仓库，将其内容复制到 `<koreader>/plugins/quickcenter.koplugin/` |
+| 1 | 从 **Releases** 下载仅含运行文件的压缩包，或克隆本仓库；将 `quickcenter.koplugin` 文件夹复制到 `<koreader>/plugins/` |
 | 2 | KOReader → 齿轮菜单 **工具 → 插件管理 → User plugins** → 启用 `QuickCenter` |
 | 3 | 重启 KOReader |
 
@@ -158,9 +158,7 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 ├── qc_scan.lua                  # 插件/补丁扫描叶子模块（PluginScan）
 ├── qc_uifont.lua                # UI 字体切换叶子模块
 ├── qc_icons.lua                 # 图标叶子模块：Nerd Font、选择器、缓存
-├── spec/                        # 单元测试（qc_config）+ 免安装 runner
 ├── _meta.lua                    # 插件元数据（禁用时仍可显示）
-├── .luacheckrc                  # luacheck 配置
 ├── pictures/                    # 截图（两份 README 共用）
 ├── README.md                    # 文档（英文）
 └── README.zh_CN.md              # 文档（简体中文）
@@ -173,9 +171,11 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 | `qc_scan.lua` | 插件 / 补丁发现与菜单项树搜索 |
 | `qc_uifont.lua` | 整机 UI 字体替换与选择对话框 |
 | `qc_icons.lua` | Nerd Font 字形、图标缓存、文件 / 系统图标选择器 |
-| `spec/` | 单元测试与 runner（内存文件系统，不写盘） |
 | `_meta.lua` | 插件管理器展示用元数据 |
+| `pictures/` | 两份 README 引用的截图 |
 | `README.md` / `README.zh_CN.md` | 双语文档（结构对位） |
+
+> `spec/`（配置单元测试）与 `.luacheckrc` 为本地开发辅助文件，**不在仓库中跟踪**；发布包仅包含运行所需文件。
 
 ---
 
@@ -225,7 +225,17 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 ## 开发者信息
 
 - **作者**: [Arin-Chin](https://github.com/Arin-Chin)
+- **仓库**: [Arin-Chin/quickcenter.koplugin](https://github.com/Arin-Chin/quickcenter.koplugin)
+- **发布**: 仅含运行文件的压缩包发布在 [Releases](https://github.com/Arin-Chin/quickcenter.koplugin/releases)
 - **许可协议**: AGPL-3.0 —— 见 [gnu.org/licenses/agpl-3.0.zh.html](https://www.gnu.org/licenses/agpl-3.0.zh.html)
+
+本地开发（辅助文件仅保留在工作副本，不在仓库中跟踪）：
+
+```bash
+luacheck .                       # 静态检查（luarocks install luacheck）
+busted spec/qc_config_spec.lua   # 单元测试（busted）
+node spec/run_spec.js            # 单元测试（Node + fengari）
+```
 
 
 
