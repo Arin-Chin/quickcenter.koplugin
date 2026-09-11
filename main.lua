@@ -102,39 +102,6 @@ local function enableCardCenterDrag(dialog)
     }
 end
 
--- 切换输入法（键盘布局）时保持已输入内容：
--- KOReader 切换布局会调用 inputbox:onSwitchingKeyboardLayout()，但核心 InputText 未实现；
--- 部分输入法（如中文）切换后需按当前文本重绘，否则界面暂显为空（再切回又出现）。
--- 这里为卡片输入框补上：先让输入法有机会提交中间态，再按当前文本重建控件并重绘卡片。
-local function installInputLayoutSwitchRefresh(dialog)
-    local it = dialog and (dialog._input_widget or (dialog.input_fields and dialog.input_fields[1]))
-    if not it or it._qs_layout_hooked then return end
-    it._qs_layout_hooked = true
-    local orig = it.onSwitchingKeyboardLayout
-    it.onSwitchingKeyboardLayout = function(self)
-        if orig then pcall(orig, self) end
-        -- 切换输入法时，部分输入法（中文 IME / 拼音增强插件）会清空或重写文本框；
-        -- 在本次切换窗口（约 1s）内做个快照：若期间文本被清空则恢复，避免丢字。
-        if not self._qs_switch_snapshot_active then
-            self._qs_switch_snapshot_active = true
-            self._qs_switch_snapshot = self.text or ""
-            UIManager:scheduleIn(1, function()
-                self._qs_switch_snapshot_active = false
-                self._qs_switch_snapshot = nil
-            end)
-        end
-        local now = self.text or ""
-        if now == "" and self._qs_switch_snapshot and self._qs_switch_snapshot ~= "" then
-            self.text = self._qs_switch_snapshot
-            self.charlist = util.splitToChars(self.text)
-            self.charpos = #self.charlist + 1
-            self.is_text_edited = true
-        end
-        pcall(self.initTextBox, self, nil, true)
-        UIManager:setDirty(dialog, "ui")
-    end
-end
-
 -- 标题栏手势保护：点击/长按落在卡片标题栏区域一律拦截并返回 true，
 -- 防止“点空白处/外部即关闭”的路径在标题栏上误触发（避免丢失未保存输入）。
 local function guardCardTitleTaps(dialog)
@@ -226,22 +193,6 @@ function ButtonDialog.new(_, ...)
     if type(args[1]) ~= "table" then args = {} else args = args[1] end
     if args.rows_per_page == nil then args.rows_per_page = 10 end
     return _orig_ButtonDialog_new(_, args)
-end
-
--- InputText.addChars 防护：中文输入法在切换键盘布局时会以 nil 调用（上游 core 会崩溃：
--- inputtext.lua 对 nil 取长度）。这里统一忽略 nil / 非法类型，避免切换输入法崩溃丢字。
-do
-    local InputText = require("ui/widget/inputtext")
-    if not InputText._qa_addchars_guarded then
-        InputText._qa_addchars_guarded = true
-        local _orig_add_chars = InputText.addChars
-        InputText.addChars = function(self, chars)
-            if chars == nil then return end
-            local tp = type(chars)
-            if tp ~= "string" and tp ~= "table" then return end
-            return _orig_add_chars(self, chars)
-        end
-    end
 end
 -- 文件管理器 / 阅读器实例（带 pcall 保护）
 local function getInstances()
@@ -1599,7 +1550,6 @@ local function showEditActionDialog(action_id, on_done, on_close)
         -- 不自动弹键盘：点按名称输入框时才弹出（如需自动弹出可放开下行）
         -- pcall(function() active_dialog:onShowKeyboard() end)
         enableCardCenterDrag(active_dialog) -- 重建居中+可拖动布局（MultiInput 自建布局丢掉了这两者）
-        installInputLayoutSwitchRefresh(active_dialog) -- 切换输入法时保持已输入内容
     end
 
     rebuildDialog()
@@ -2661,7 +2611,6 @@ function QC.showCustomQADialog(qa_id, on_done, on_close)
         -- 不自动弹键盘：点按名称输入框时才弹出（如需自动弹出可放开下行）
         -- pcall(function() active_dialog:onShowKeyboard() end)
         enableCardCenterDrag(active_dialog) -- 重建居中+可拖动布局（MultiInput 自建布局丢掉了这两者）
-        installInputLayoutSwitchRefresh(active_dialog) -- 切换输入法时保持已输入内容
     end
 
     openDispatcherPicker = function(touch_menu)
@@ -4498,9 +4447,6 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
-
-
-
 
 
 
