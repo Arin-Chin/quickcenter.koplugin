@@ -1161,6 +1161,7 @@ local function deleteCustomQA(qa_id)
     local custom = getTable("custom")
     custom[qa_id] = nil
     setTable("custom", custom)
+    -- 从自定义列表中移除
     local list = getSetting("custom_list")
     if type(list) ~= "table" then list = {} end
     local new_list = {}
@@ -1168,6 +1169,20 @@ local function deleteCustomQA(qa_id)
         if id ~= qa_id then new_list[#new_list + 1] = id end
     end
     setSetting("custom_list", new_list)
+    -- 关联清理：快捷操作菜单
+    local sh = QC.getShortcuts()
+    local new_sh, sh_changed = {}, false
+    for _i, sid in ipairs(sh) do
+        if sid == qa_id then sh_changed = true else new_sh[#new_sh + 1] = sid end
+    end
+    if sh_changed then QC.saveShortcuts(new_sh) end
+    -- 关联清理：面板按钮（排列按钮/编辑按钮均读取 qa_slots）
+    local slots = getQASlots()
+    local new_slots, slot_changed = {}, false
+    for _i, sid in ipairs(slots) do
+        if sid == qa_id then slot_changed = true else new_slots[#new_slots + 1] = sid end
+    end
+    if slot_changed then saveQASlots(new_slots) end
 end
 
 function QC.removeFromPanel(action_id, touch_menu)
@@ -1601,16 +1616,22 @@ setButtonMembership = function(id, on)
     end
 end
 
--- 清除已不存在动作的僵尸按钮（如被移除的内置动作）
+-- 清除已不存在动作的僵尸引用（如被移除的内置动作）：面板按钮 + 快捷操作菜单
 pruneZombieButtonSlots = function()
-    local slots = getQASlots()
     local custom = getTable("custom")
+    local slots = getQASlots()
     local kept, changed = {}, false
     for _i, id in ipairs(slots) do
         if getAction(id) or custom[id] then kept[#kept + 1] = id else changed = true end
     end
     if changed then saveQASlots(kept) end
-    return changed
+    local sh = QC.getShortcuts()
+    local kept_sh, sh_changed = {}, false
+    for _i, id in ipairs(sh) do
+        if getAction(id) or custom[id] then kept_sh[#kept_sh + 1] = id else sh_changed = true end
+    end
+    if sh_changed then QC.saveShortcuts(kept_sh) end
+    return changed or sh_changed
 end
 
 local function getCustomItems(touch_menu)
@@ -2787,6 +2808,7 @@ end
 
 -- 设置内子菜单：列出已添加到快捷操作菜单的动作，勾选即去除
 function QC.getShortcutMenuItems(touch_menu)
+    pruneZombieButtonSlots() -- 先清理失效引用（删除动作/内置移除后的残留）
     local items = {}
     for _i, id in ipairs(QC.getShortcuts()) do
         items[#items + 1] = {
@@ -4447,6 +4469,7 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
 
 
 
