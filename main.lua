@@ -3354,6 +3354,76 @@ function QC.showSettingsMenu(touch_menu)
                     },
                 },
                 {
+                    text = _("状态条栏"),
+                    sub_item_table = {
+                        {
+                            text = function() return (getBool("qa_statusbar_enabled") and "✓ " or "  ") .. _("启用状态条") end,
+                            callback = function()
+                                setBool("qa_statusbar_enabled", not getBool("qa_statusbar_enabled"))
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        { text = "----------------------------", enabled = false },
+                        {
+                            text = function() local it = getTable("qa_statusbar_items") or {}; return (it.time ~= false and "✓ " or "  ") .. _("时间") end,
+                            callback = function()
+                                local it = getTable("qa_statusbar_items") or {}
+                                it.time = not (it.time ~= false)
+                                setTable("qa_statusbar_items", it)
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        {
+                            text = function() local it = getTable("qa_statusbar_items") or {}; return (it.date ~= false and "✓ " or "  ") .. _("日期") end,
+                            callback = function()
+                                local it = getTable("qa_statusbar_items") or {}
+                                it.date = not (it.date ~= false)
+                                setTable("qa_statusbar_items", it)
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        {
+                            text = function() local it = getTable("qa_statusbar_items") or {}; return (it.battery ~= false and "✓ " or "  ") .. _("电量") end,
+                            enabled = Device:hasBattery(),
+                            callback = function()
+                                local it = getTable("qa_statusbar_items") or {}
+                                it.battery = not (it.battery ~= false)
+                                setTable("qa_statusbar_items", it)
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        {
+                            text = function() local it = getTable("qa_statusbar_items") or {}; return (it.wifi ~= false and "✓ " or "  ") .. _("Wi-Fi 状态") end,
+                            callback = function()
+                                local it = getTable("qa_statusbar_items") or {}
+                                it.wifi = not (it.wifi ~= false)
+                                setTable("qa_statusbar_items", it)
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        {
+                            text = function() local it = getTable("qa_statusbar_items") or {}; return (it.frontlight ~= false and "✓ " or "  ") .. _("前光") end,
+                            enabled = Device:hasFrontlight(),
+                            callback = function()
+                                local it = getTable("qa_statusbar_items") or {}
+                                it.frontlight = not (it.frontlight ~= false)
+                                setTable("qa_statusbar_items", it)
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                        {
+                            text = function() local it = getTable("qa_statusbar_items") or {}; return (it.warmth ~= false and "✓ " or "  ") .. _("色温") end,
+                            enabled = Device:hasNaturalLight(),
+                            callback = function()
+                                local it = getTable("qa_statusbar_items") or {}
+                                it.warmth = not (it.warmth ~= false)
+                                setTable("qa_statusbar_items", it)
+                                refreshQuickPanel(touch_menu)
+                            end,
+                        },
+                    },
+                },
+                {
                     text = _("滑块样式"),
                     sub_item_table = function()
                         return {
@@ -4137,6 +4207,45 @@ local function _qsHandleTap(self, ges_ev, with_buttons)
     return false
 end
 
+-- 控制中心状态条（菜单右下角）文案：按 qa_statusbar_items 组合所选信息
+local function qaStatusBarText()
+    if not getBool("qa_statusbar_enabled") then return "" end
+    local items = getTable("qa_statusbar_items") or {}
+    local function on(k) return items[k] ~= false end
+    local parts = {}
+    if on("time") then
+        local G = rawget(_G, "G_reader_settings")
+        parts[#parts + 1] = datetime.secondsToHour(os.time(), G and G:isTrue("twelve_hour_clock") or false)
+    end
+    if on("date") then parts[#parts + 1] = os.date("%m-%d") end
+    if on("battery") and Device:hasBattery() then
+        local powerd = Device:getPowerDevice()
+        local lvl = powerd:getCapacity()
+        local sym = powerd:getBatterySymbol(powerd:isCharged(), powerd:isCharging(), lvl)
+        parts[#parts + 1] = sym .. lvl .. "%"
+    end
+    if on("wifi") then
+        local NetworkMgr = getNetworkMgr()
+        if NetworkMgr then
+            local ok, is_on = pcall(function() return NetworkMgr:isWifiOn() end)
+            if ok then parts[#parts + 1] = is_on and _("Wi-Fi") or _("Wi-Fi 关") end
+        end
+    end
+    if on("frontlight") and Device:hasFrontlight() then
+        local ok, v = pcall(function() return Device:getPowerDevice():frontlightIntensity() end)
+        if ok and v then parts[#parts + 1] = _("前光") .. " " .. tostring(v) end
+    end
+    if on("warmth") and Device:hasNaturalLight() then
+        local ok, v = pcall(function()
+            local p = Device:getPowerDevice()
+            return p:toNativeWarmth(p:frontlightWarmth())
+        end)
+        if ok and v then parts[#parts + 1] = _("色温") .. " " .. tostring(v) end
+    end
+    if #parts == 0 then return "" end
+    return BD.wrap(table.concat(parts, "  "))
+end
+
 function TouchMenu:updateItems(target_page, target_item_id)
     if not self.item_table or not self.item_table._qs_panel then
         self._qs_refs = nil
@@ -4160,15 +4269,7 @@ function TouchMenu:updateItems(target_page, target_item_id)
     self.page_info_right_chev:showHide(false)
     if self.page_info_left_chev then self.page_info_left_chev.hold_callback = nil end
     if self.page_info_right_chev then self.page_info_right_chev.hold_callback = nil end
-    local G = rawget(_G, "G_reader_settings")
-    local time_txt = datetime.secondsToHour(os.time(), G and G:isTrue("twelve_hour_clock") or false)
-    if Device:hasBattery() then
-        local powerd = Device:getPowerDevice()
-        local lvl = powerd:getCapacity()
-        local sym = powerd:getBatterySymbol(powerd:isCharged(), powerd:isCharging(), lvl)
-        time_txt = BD.wrap(time_txt) .. " " .. BD.wrap("⌁") .. BD.wrap(sym) .. BD.wrap(lvl .. "%")
-    end
-    self.time_info:setText(time_txt)
+    self.time_info:setText(qaStatusBarText())
     local old_dimen = self.dimen:copy()
     self.dimen.w = self.width
     self.dimen.h = self.item_group:getSize().h + self.bordersize * 2 + self.padding
@@ -4469,6 +4570,7 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
 
 
 

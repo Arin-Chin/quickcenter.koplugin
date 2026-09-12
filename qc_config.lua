@@ -16,6 +16,8 @@ local MAX_SLOTS = 66
 DEFAULT_CONFIG = {
     qa_tab_icon = "star.empty",
     qa_enabled = true,
+    qa_statusbar_enabled = true,
+    qa_statusbar_items = { time = true, battery = true },
     qa_slots = { "wifi", "night", "rotate", "screenshot", "continue", "fontlist", "restart", "search", "qa_settings", "qa_add_button", "qa_new" },
     qa_frontlight = true,
     qa_warmth = true,
@@ -240,4 +242,5 @@ return {
     buttonHoldEdit = buttonHoldEdit, settingsOnHold = settingsOnHold,
     getButtonSizePct = getButtonSizePct,
 }
+
 
