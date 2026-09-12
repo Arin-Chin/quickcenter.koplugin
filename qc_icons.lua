@@ -664,9 +664,11 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
         return n
     end
 
+    -- 注意：这两个函数被后面的 PickerDlg 手势处理器引用，必须在 if 块外声明
+    local resetIcons, applyIcons
     local btn_row
     if mode == "system" then
-        local function resetIcons()
+        resetIcons = function()
             if countReplaced() == 0 then
                 UIManager:show(InfoMessage:new{ text = _("没有已替换的图标需要重置"), timeout = 2 })
                 return
@@ -677,7 +679,7 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
             UIManager:show(Notification:new{ text = _("已重置所有图标，重启后生效"), timeout = 2 })
             askRestart()
         end
-        local function applyIcons()
+        applyIcons = function()
             local n = countReplaced()
             if n == 0 then
                 UIManager:show(InfoMessage:new{ text = _("没有已替换的图标需要应用"), timeout = 2 })
@@ -1029,3 +1031,4 @@ return {
     resetSystemTempOverrides = resetSystemTempOverrides,
     showIconPicker = showIconPicker,
 }
+
