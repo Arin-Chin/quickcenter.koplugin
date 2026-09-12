@@ -6,17 +6,17 @@
 
 ---
 
-## 📖 概述
+##  概述
 
 QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文件保留在本仓库历史中，供对照）迁移而来的标准 KOReader **插件**。它经官方 PluginLoader 加载：`main.lua` 仅在插件「启用」时执行，且全程不写 `_G`。
 
 | 功能 | 说明 |
 | :--- | :--- |
-| ⚡ **快捷操作** | 5 种类型的常用操作：录制、编辑、管理；从快捷操作菜单或手势一键运行 |
-| 🎛️ **控制中心** | 注入菜单首个标签页的一键操作面板（文件管理器与阅读器通用），含布局、形状、滑块、过滤与手势行为设置 |
-| 🖼️ **图标与字体** | 图标选择器（Nerd Font / SVG / PNG）、系统图标替换、整机 UI 字体切换（常规 / 粗体 / 等宽） |
+| **快捷操作** | 5 种类型的常用操作：文件夹、集合、插件补丁、系统、录制；从快捷操作菜单或手势一键运行 |
+| **控制中心** | 注入菜单首个标签页的一键操作面板（文件管理器与阅读器通用），含布局、形状、滑块、过滤与手势行为设置 |
+| **图标与字体** | 图标选择器（Nerd Font / SVG / PNG）、系统图标替换、整机 UI 字体切换（常规 / 粗体 / 等宽） |
 
-<img src="pictures/1.QCpreview.png" alt="QuickCenter 预览" width="400" />
+<img src="pictures/01-QCpreview.png" alt="QuickCenter 预览" width="200"  style="display: block; margin: 0 auto;"  />
 
 ### 📦 快速安装
 
@@ -33,16 +33,13 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 | 紧跟上游补丁更新 | 继续使用补丁版（见仓库历史） |
 | 希望通过插件管理器标准启停 | 使用本插件 |
 
-> 💡 **灵感来源**：[kopatches](https://github.com/gytwo/kopatches) ·
-> [quickui.koplugin](https://github.com/gytwo/quickui.koplugin) ·
-> [simpleui.koplugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin) ·
-> [KOReader.patches](https://github.com/joshuacant/KOReader.patches)
+> 💡 **灵感来源**：[kopatches](https://github.com/gytwo/kopatches) 
 
 ---
 
-## 🚀 核心功能
+##  核心功能
 
-### 1. ⚡ 快捷操作
+### 1.  快捷操作
 
 | 功能 | 说明 |
 | :--- | :--- |
@@ -54,19 +51,23 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 
 <table>
   <tr>
-    <td><img src="pictures/02-quick-actions-menu.png" alt="快捷操作菜单" width="400" /></td>
-    <td><img src="pictures/03-edit-quick-actions.png" alt="编辑快捷操作" width="400" /></td>
+    <td><img src="pictures/01-quick-actions.png" alt="快捷操作菜单" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-1.png" alt="编辑快捷操作" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-1-1.png" alt="新建快捷操作" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-1-2.png" alt="内置操作" width="200" /></td>
   </tr>
 </table>
 
 <table>
   <tr>
-    <td><img src="pictures/04-shortcut-menu.png" alt="快捷方式菜单" width="400" /></td>
-    <td><img src="pictures/05-shortcut-menu-gesture.png" alt="手势呼出快捷方式菜单" width="400" /></td>
+    <td><img src="pictures/01-quick-actions-1-3.png" alt="自定义操作" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-2.png" alt="快捷操作菜单" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-2-1.png" alt="排列快捷操作" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-2-2.png" alt="长按序号排列操作" width="200" /></td>
   </tr>
 </table>
 
-### 2. 🎛️ 控制中心
+### 2.  控制中心
 
 注入顶部菜单**首个标签页**（文件管理器与阅读器通用）的可自定义操作面板，以及它的全部按钮相关设置。
 
@@ -84,13 +85,13 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 | **标签大小** | 50% ~ 200%（步进 10%，默认 90%） |
 | **显示标签** | 开关 |
 | **长按行为** | 长按按钮 → 编辑 · 长按面板 → 打开设置 |
+| **状态条** | 控制中心面板右下角状态条：开关及显示内容（时间 / 日期 / 电量 / Wi-Fi / 前光 / 色温）；**长按单项可编辑其格式**（时间/日期用 strftime，其余支持 `{value}`、`{level}`、`{symbol}`、`{on}`、`{off}` 占位符） |
 | **前光 / 色温滑块** | 支持可选数值显示与 Min / Max 快捷键（需设备支持） |
 
-<img src="pictures/06-control-center-panel.png" alt="控制中心面板" width="400" />
+<img src="pictures/02-control-center.png" alt="控制中心面板" width="200"  style="display: block; margin: 0 auto;"  />
 
-<img src="pictures/07-control-center-menu.png" alt="控制中心菜单" width="400" />
 
-### 3. ⚙️ 设置
+### 3.  设置
 
 通过菜单入口或 `qa_settings_action` 手势打开设置。
 
@@ -110,9 +111,7 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 
 > 预设可随时保存、覆盖和恢复——方便在阅读 / 夜间 / 出行等场景间快速切换。
 
-<img src="pictures/08-settings-menu.png" alt="设置菜单" width="400" />
-
-<img src="pictures/09-config-management.png" alt="配置管理" width="400" />
+<img src="pictures/03-settings.png" alt="设置菜单" width="200"  style="display: block; margin: 0 auto;" />
 
 #### 图标选择器
 
@@ -128,7 +127,7 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 
 ---
 
-## 🔧 支持
+##  支持
 
 | 入口 | 位置 |
 | :--- | :--- |
@@ -147,14 +146,14 @@ QuickCenter 是一个由补丁 `koreader/patches/2-quickcenter.lua`（旧版文�
 
 ---
 
-## 📁 文件结构
+##  文件结构
 
 ```
 quickcenter.koplugin/            # 仓库根 == 插件根
 ├── main.lua                     # 入口：插件类与生命周期、动作注册表、面板与
-│                                #   对话框、TouchMenu 等补丁安装
+│                                # 对话框、TouchMenu 等补丁安装
 ├── qc_config.lua                # 配置叶子模块：默认值、序列化、原子保存/加载、
-│                                #   设置访问器
+│                                # 设置访问器
 ├── qc_scan.lua                  # 插件/补丁扫描叶子模块（PluginScan）
 ├── qc_uifont.lua                # UI 字体切换叶子模块
 ├── qc_icons.lua                 # 图标叶子模块：Nerd Font、选择器、缓存
@@ -179,7 +178,7 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 
 ---
 
-## ⚙️ 配置
+##  配置
 
 所有设置保存在 `koreader/settings/quickcenter.lua`（首次运行自动生成；补丁时代的旧配置文件可直接沿用——无需迁移）。
 
@@ -187,13 +186,14 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 | :--- | :--- | :--- |
 | 面板 | `qa_enabled` / `qa_slots` / `qa_*` | 面板开关、按钮顺序、形状、大小、标签、滑块 |
 | 布局 | `qa_layout_*` | 固定按钮网格（开关 / 行数 / 每行数） |
+| 状态条 | `qa_statusbar_enabled` / `qa_statusbar_items` / `qa_statusbar_formats` | 面板右下角状态条开关、显示项与单项格式覆盖 |
 | 快捷方式 | `qa_shortcuts` | 已加入快捷操作菜单的动作 |
 | 预设 | `saved_configs` | 命名配置预设 |
 | 外观 | `qa_tab_icon` / `qa_icon_overrides` / `ui_font_overrides` | 面板标签图标、系统图标替换、UI 字体 |
 
 ---
 
-## 🌐 国际化
+##  国际化
 
 | 项目 | 说明 |
 | :--- | :--- |
@@ -203,14 +203,7 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 
 ---
 
-## 📦 更新记录
-
-| 日期 | 版本 | 说明 |
-| :--- | :--- | :--- |
-| 2026-09-11 | 1.0.0 | 首个正式发布：由旧补丁 `2-quickcenter.lua` 迁移为标准 KOReader 插件；模块化结构（`qc_config`/`qc_scan`/`qc_uifont`/`qc_icons`）；PluginLoader 生命周期、不写 `_G`；快捷操作（5 种类型、菜单录制、快捷操作菜单）与状态前缀 `≡`/`⊚`；控制中心面板（网格、形状、背景、大小、标签、滑块、场景过滤）；图标选择与系统图标替换；UI 字体切换；命名配置预设与应用；手势动作；稳定性修复 |
----
-
-## 🔌 兼容性
+##  兼容性
 
 | 项目 | 要求 |
 | :--- | :--- |
@@ -225,17 +218,7 @@ quickcenter.koplugin/            # 仓库根 == 插件根
 ## 开发者信息
 
 - **作者**: [Arin-Chin](https://github.com/Arin-Chin)
-- **仓库**: [Arin-Chin/quickcenter.koplugin](https://github.com/Arin-Chin/quickcenter.koplugin)
-- **发布**: 仅含运行文件的压缩包发布在 [Releases](https://github.com/Arin-Chin/quickcenter.koplugin/releases)
 - **许可协议**: AGPL-3.0 —— 见 [gnu.org/licenses/agpl-3.0.zh.html](https://www.gnu.org/licenses/agpl-3.0.zh.html)
-
-本地开发（辅助文件仅保留在工作副本，不在仓库中跟踪）：
-
-```bash
-luacheck .                       # 静态检查（luarocks install luacheck）
-busted spec/qc_config_spec.lua   # 单元测试（busted）
-node spec/run_spec.js            # 单元测试（Node + fengari）
-```
 
 
 

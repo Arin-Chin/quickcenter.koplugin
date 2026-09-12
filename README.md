@@ -6,7 +6,7 @@
 
 ---
 
-## 📖 Overview
+## Overview
 
 QuickCenter is a standard KOReader **plugin** migrated from the patch
 `koreader/patches/2-quickcenter.lua` (kept in this repository's history for reference).
@@ -15,11 +15,11 @@ plugin is **enabled**, and it never writes to `_G`.
 
 | Feature | Description |
 | :--- | :--- |
-| ⚡ **Quick Actions** | Record, edit and manage frequent actions of 5 types; run them from a shortcut menu or by gesture |
-| 🎛️ **Control Center** | A one-tap action panel injected as the first menu tab (Filemanager & Reader), with layout, shape, slider, filter and gesture-behavior options |
-| 🖼️ **Icons & Fonts** | Icon picker (Nerd Font / SVG / PNG), system icon replacement, and whole-UI font switching (Regular / Bold / Mono) |
+| **Quick Actions** | Frequent actions of 5 types: folder, collection, plugin/patch, system, recording; run them from the shortcut menu or by gesture |
+| **Control Center** | A one-tap action panel injected as the first menu tab (Filemanager & Reader), with layout, shape, slider, filter and gesture-behavior options |
+| **Icons & Fonts** | Icon picker (Nerd Font / SVG / PNG), system icon replacement, and whole-UI font switching (Regular / Bold / Mono) |
 
-<img src="pictures/1.QCpreview.png" alt="QuickCenter preview" width="400" />
+<img src="pictures/01-QCpreview.png" alt="QuickCenter preview" width="200"  style="display: block; margin: 0 auto;"  />
 
 ### 📦 Quick install
 
@@ -38,16 +38,13 @@ plugin is **enabled**, and it never writes to `_G`.
 | Following upstream patch releases closely | Keep using the patch form (see repository history) |
 | Want standard enable/disable via the Plugin manager | Use this plugin |
 
-> 💡 **Inspiration**: [kopatches](https://github.com/gytwo/kopatches) ·
-> [quickui.koplugin](https://github.com/gytwo/quickui.koplugin) ·
-> [simpleui.koplugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin) ·
-> [KOReader.patches](https://github.com/joshuacant/KOReader.patches)
+> 💡 **Inspiration**: [kopatches](https://github.com/gytwo/kopatches)
 
 ---
 
-## 🚀 Core Features
+## Core Features
 
-### 1. ⚡ Quick Actions
+### 1. Quick Actions
 
 | Feature | Description |
 | :--- | :--- |
@@ -59,19 +56,23 @@ plugin is **enabled**, and it never writes to `_G`.
 
 <table>
   <tr>
-    <td><img src="pictures/02-quick-actions-menu.png" alt="Quick Actions menu" width="400" /></td>
-    <td><img src="pictures/03-edit-quick-actions.png" alt="Edit Quick Actions" width="400" /></td>
+    <td><img src="pictures/01-quick-actions.png" alt="Quick Actions menu" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-1.png" alt="Edit Quick Actions" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-1-1.png" alt="New Quick Action" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-1-2.png" alt="Built-in actions" width="200" /></td>
   </tr>
 </table>
 
 <table>
   <tr>
-    <td><img src="pictures/04-shortcut-menu.png" alt="Shortcut menu" width="400" /></td>
-    <td><img src="pictures/05-shortcut-menu-gesture.png" alt="Gesture-launched shortcut menu" width="400" /></td>
+    <td><img src="pictures/01-quick-actions-1-3.png" alt="Custom actions" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-2.png" alt="Quick Actions menu" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-2-1.png" alt="Arrange Quick Actions" width="200" /></td>
+    <td><img src="pictures/01-quick-actions-2-2.png" alt="Hold the index to reorder actions" width="200" /></td>
   </tr>
 </table>
 
-### 2. 🎛️ Control Center
+### 2. Control Center
 
 A customizable action panel injected as the **first tab** of the top menu (Filemanager &
 Reader), plus everything about its buttons.
@@ -93,11 +94,9 @@ Reader), plus everything about its buttons.
 | **Status bar** | Bottom-right status bar of the Control Center panel: enable/disable and pick items (time / date / battery / Wi-Fi / frontlight / warmth); long-press an item to edit its format (strftime for time/date, placeholders such as `{value}`, `{level}`, `{symbol}`, `{on}`, `{off}`) |
 | **Frontlight / warmth sliders** | With optional value display and Min / Max shortcuts (requires device support) |
 
-<img src="pictures/06-control-center-panel.png" alt="Control Center panel" width="400" />
+<img src="pictures/02-control-center.png" alt="Control Center panel" width="200"  style="display: block; margin: 0 auto;"  />
 
-<img src="pictures/07-control-center-menu.png" alt="Control Center menu" width="400" />
-
-### 3. ⚙️ Settings
+### 3. Settings
 
 Settings are opened via the menu entry or the `qa_settings_action` gesture.
 
@@ -118,9 +117,7 @@ Settings are opened via the menu entry or the `qa_settings_action` gesture.
 > Presets can be saved, overwritten and restored at any time — handy for switching between
 > reading / night / travel setups.
 
-<img src="pictures/08-settings-menu.png" alt="Settings menu" width="400" />
-
-<img src="pictures/09-config-management.png" alt="Config management" width="400" />
+<img src="pictures/03-settings.png" alt="Settings menu" width="200"  style="display: block; margin: 0 auto;" />
 
 #### Icon picker
 
@@ -137,7 +134,7 @@ preview and one-tap reset.
 
 ---
 
-## 🔧 Support
+## Support
 
 | Entry | Location |
 | :--- | :--- |
@@ -162,7 +159,7 @@ names is a silent no-op while disabled.
 
 ---
 
-## 📁 File Structure
+## File Structure
 
 ```
 quickcenter.koplugin/            # repository root == plugin root
@@ -194,7 +191,7 @@ quickcenter.koplugin/            # repository root == plugin root
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 All settings live in `koreader/settings/quickcenter.lua` (auto-generated on first run;
 an existing file from the patch era is reused as-is — no migration needed).
@@ -210,7 +207,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ---
 
-## 🌐 Internationalization
+## Internationalization
 
 | Item | Description |
 | :--- | :--- |
@@ -220,14 +217,8 @@ an existing file from the patch era is reused as-is — no migration needed).
 
 ---
 
-## 📦 Changelog
 
-| Date | Version | Notes |
-| :--- | :--- | :--- |
-| 2026-09-11 | 1.0.0 | Initial release: standard KOPlugin migrated from the legacy `2-quickcenter.lua` patch; modular layout (`qc_config`/`qc_scan`/`qc_uifont`/`qc_icons`); PluginLoader lifecycle with no `_G` writes; Quick Actions (5 types, menu recording, shortcut menu) with status prefixes `≡`/`⊚`; Control Center panel (grid, shape, background, size, labels, sliders, context filter); icon picker and system icon replacement; UI font switching; named config presets with apply; gesture actions; stability fixes |
----
-
-## 🔌 Compatibility
+## Compatibility
 
 | Item | Requirement |
 | :--- | :--- |
@@ -242,17 +233,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 ## Developer Info
 
 - **Author**: [Arin-Chin](https://github.com/Arin-Chin)
-- **Repository**: [Arin-Chin/quickcenter.koplugin](https://github.com/Arin-Chin/quickcenter.koplugin)
-- **Releases**: runtime-only zip packages are published under [Releases](https://github.com/Arin-Chin/quickcenter.koplugin/releases)
 - **License**: AGPL-3.0 — see [gnu.org/licenses/agpl-3.0.en.html](https://www.gnu.org/licenses/agpl-3.0.en.html)
-
-Local development (helpers kept in a working copy, not tracked here):
-
-```bash
-luacheck .                       # static checks (luarocks install luacheck)
-busted spec/qc_config_spec.lua   # unit tests (busted)
-node spec/run_spec.js            # unit tests (Node + fengari)
-```
 
 
 
