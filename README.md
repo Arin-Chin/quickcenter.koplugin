@@ -90,7 +90,7 @@ Reader), plus everything about its buttons.
 | **Label size** | 50% ~ 200% (step 10%, default 90%) |
 | **Show labels** | Toggle |
 | **Hold behaviors** | Hold a button → edit · hold the panel → open settings |
-| **Status bar** | Bottom-right status bar of the Control Center panel: enable/disable and pick items (time / date / battery / Wi-Fi / frontlight / warmth) |
+| **Status bar** | Bottom-right status bar of the Control Center panel: enable/disable and pick items (time / date / battery / Wi-Fi / frontlight / warmth); long-press an item to edit its format (strftime for time/date, placeholders such as `{value}`, `{level}`, `{symbol}`, `{on}`, `{off}`) |
 | **Frontlight / warmth sliders** | With optional value display and Min / Max shortcuts (requires device support) |
 
 <img src="pictures/06-control-center-panel.png" alt="Control Center panel" width="400" />
@@ -203,7 +203,7 @@ an existing file from the patch era is reused as-is — no migration needed).
 | :--- | :--- | :--- |
 | Panel | `qa_enabled` / `qa_slots` / `qa_*` | Panel enable, button order, shape, size, labels, sliders |
 | Layout | `qa_layout_*` | Fixed button grid (enabled / rows / buttons per row) |
-| Status bar | `qa_statusbar_enabled` / `qa_statusbar_items` | Panel bottom-right status bar toggle and displayed items |
+| Status bar | `qa_statusbar_enabled` / `qa_statusbar_items` / `qa_statusbar_formats` | Panel bottom-right status bar toggle, displayed items and per-item format overrides |
 | Shortcuts | `qa_shortcuts` | Actions added to the shortcut menu |
 | Presets | `saved_configs` | Named configuration presets |
 | Appearance | `qa_tab_icon` / `qa_icon_overrides` / `ui_font_overrides` | Panel tab icon, system icon replacement, UI fonts |

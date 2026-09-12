@@ -3153,6 +3153,40 @@ function QC.showSettingsMenu(touch_menu)
         settingsReturnSoon()
     end
 
+    -- 状态条单项长按：编辑该项格式（支持占位符；留空恢复默认）
+    local function editStatusFormat(key, label, hint)
+        local formats = getTable("qa_statusbar_formats") or {}
+        local dlg
+        dlg = InputDialog:new{
+            title = string.format(_("编辑“%s”格式"), label),
+            description = hint,
+            input = formats[key] or "",
+            buttons = {
+                {
+                    { text = _("保存"), callback = function()
+                        local v = dlg:getInputText() or ""
+                        local fmts = getTable("qa_statusbar_formats") or {}
+                        if v == "" then fmts[key] = nil else fmts[key] = v end
+                        setTable("qa_statusbar_formats", fmts)
+                        UIManager:close(dlg)
+                        refreshQuickPanel(touch_menu)
+                    end },
+                    { text = _("恢复默认"), callback = function()
+                        local fmts = getTable("qa_statusbar_formats") or {}
+                        fmts[key] = nil
+                        setTable("qa_statusbar_formats", fmts)
+                        UIManager:close(dlg)
+                        refreshQuickPanel(touch_menu)
+                    end },
+                    { text = _("取消"), callback = function() UIManager:close(dlg) end },
+                },
+            },
+            tap_close_callback = function() UIManager:close(dlg) end,
+        }
+        UIManager:show(dlg)
+        pcall(function() dlg:onShowKeyboard() end)
+    end
+
     root_menu_items = {
         {
             text = _("快捷操作"),
@@ -3354,7 +3388,7 @@ function QC.showSettingsMenu(touch_menu)
                     },
                 },
                 {
-                    text = _("状态条栏"),
+                    text = _("状态条"),
                     sub_item_table = {
                         {
                             text = function() return (getBool("qa_statusbar_enabled") and "✓ " or "  ") .. _("启用状态条") end,
@@ -3366,6 +3400,9 @@ function QC.showSettingsMenu(touch_menu)
                         { text = "----------------------------", enabled = false },
                         {
                             text = function() local it = getTable("qa_statusbar_items") or {}; return (it.time ~= false and "✓ " or "  ") .. _("时间") end,
+                            hold_callback = function()
+                                editStatusFormat("time", _("时间"), _("strftime 格式，例如 %H:%M；留空使用系统 12/24 小时制"))
+                            end,
                             callback = function()
                                 local it = getTable("qa_statusbar_items") or {}
                                 it.time = not (it.time ~= false)
@@ -3375,6 +3412,9 @@ function QC.showSettingsMenu(touch_menu)
                         },
                         {
                             text = function() local it = getTable("qa_statusbar_items") or {}; return (it.date ~= false and "✓ " or "  ") .. _("日期") end,
+                            hold_callback = function()
+                                editStatusFormat("date", _("日期"), _("strftime 格式，例如 %m-%d 或 %Y-%m-%d"))
+                            end,
                             callback = function()
                                 local it = getTable("qa_statusbar_items") or {}
                                 it.date = not (it.date ~= false)
@@ -3384,6 +3424,9 @@ function QC.showSettingsMenu(touch_menu)
                         },
                         {
                             text = function() local it = getTable("qa_statusbar_items") or {}; return (it.battery ~= false and "✓ " or "  ") .. _("电量") end,
+                            hold_callback = function()
+                                editStatusFormat("battery", _("电量"), _("占位符：{symbol} 电池图标、{level} 电量数值"))
+                            end,
                             enabled = Device:hasBattery(),
                             callback = function()
                                 local it = getTable("qa_statusbar_items") or {}
@@ -3394,6 +3437,9 @@ function QC.showSettingsMenu(touch_menu)
                         },
                         {
                             text = function() local it = getTable("qa_statusbar_items") or {}; return (it.wifi ~= false and "✓ " or "  ") .. _("Wi-Fi 状态") end,
+                            hold_callback = function()
+                                editStatusFormat("wifi", _("Wi-Fi 状态"), _("占位符：{on} 已连接、{off} 未连接"))
+                            end,
                             callback = function()
                                 local it = getTable("qa_statusbar_items") or {}
                                 it.wifi = not (it.wifi ~= false)
@@ -3403,6 +3449,9 @@ function QC.showSettingsMenu(touch_menu)
                         },
                         {
                             text = function() local it = getTable("qa_statusbar_items") or {}; return (it.frontlight ~= false and "✓ " or "  ") .. _("前光") end,
+                            hold_callback = function()
+                                editStatusFormat("frontlight", _("前光"), _("占位符：{value} 前光数值"))
+                            end,
                             enabled = Device:hasFrontlight(),
                             callback = function()
                                 local it = getTable("qa_statusbar_items") or {}
@@ -3413,6 +3462,9 @@ function QC.showSettingsMenu(touch_menu)
                         },
                         {
                             text = function() local it = getTable("qa_statusbar_items") or {}; return (it.warmth ~= false and "✓ " or "  ") .. _("色温") end,
+                            hold_callback = function()
+                                editStatusFormat("warmth", _("色温"), _("占位符：{value} 色温数值"))
+                            end,
                             enabled = Device:hasNaturalLight(),
                             callback = function()
                                 local it = getTable("qa_statusbar_items") or {}
@@ -4207,6 +4259,22 @@ local function _qsHandleTap(self, ges_ev, with_buttons)
     return false
 end
 
+-- 状态条每项的格式：取用户覆盖或用默认；空串视为默认
+local function qaStatusFormat(key, default_fmt)
+    local formats = getTable("qa_statusbar_formats") or {}
+    local f = formats[key]
+    if type(f) == "string" and f ~= "" then return f end
+    return default_fmt
+end
+
+-- 占位符替换（用函数形式避免 % 转义问题）
+local function qaFill(tpl, map)
+    return (tpl:gsub("{(%w+)}", function(k)
+        local v = map[k]
+        return v ~= nil and tostring(v) or ("{" .. k .. "}")
+    end))
+end
+
 -- 控制中心状态条（菜单右下角）文案：按 qa_statusbar_items 组合所选信息
 local function qaStatusBarText()
     if not getBool("qa_statusbar_enabled") then return "" end
@@ -4214,33 +4282,48 @@ local function qaStatusBarText()
     local function on(k) return items[k] ~= false end
     local parts = {}
     if on("time") then
-        local G = rawget(_G, "G_reader_settings")
-        parts[#parts + 1] = datetime.secondsToHour(os.time(), G and G:isTrue("twelve_hour_clock") or false)
+        local f = qaStatusFormat("time", nil)
+        if f then
+            parts[#parts + 1] = os.date(f)
+        else
+            local G = rawget(_G, "G_reader_settings")
+            parts[#parts + 1] = datetime.secondsToHour(os.time(), G and G:isTrue("twelve_hour_clock") or false)
+        end
     end
-    if on("date") then parts[#parts + 1] = os.date("%m-%d") end
+    if on("date") then parts[#parts + 1] = os.date(qaStatusFormat("date", "%m-%d")) end
     if on("battery") and Device:hasBattery() then
         local powerd = Device:getPowerDevice()
         local lvl = powerd:getCapacity()
         local sym = powerd:getBatterySymbol(powerd:isCharged(), powerd:isCharging(), lvl)
-        parts[#parts + 1] = sym .. lvl .. "%"
+        parts[#parts + 1] = qaFill(qaStatusFormat("battery", "{symbol}{level}%"), { symbol = sym, level = lvl })
     end
     if on("wifi") then
         local NetworkMgr = getNetworkMgr()
         if NetworkMgr then
             local ok, is_on = pcall(function() return NetworkMgr:isWifiOn() end)
-            if ok then parts[#parts + 1] = is_on and _("Wi-Fi") or _("Wi-Fi 关") end
+            if ok then
+                local on_text = _("Wi-Fi")
+                local off_text = _("Wi-Fi 关")
+                local f = qaStatusFormat("wifi", nil)
+                parts[#parts + 1] = f and qaFill(f, { on = on_text, off = off_text })
+                    or (is_on and on_text or off_text)
+            end
         end
     end
     if on("frontlight") and Device:hasFrontlight() then
         local ok, v = pcall(function() return Device:getPowerDevice():frontlightIntensity() end)
-        if ok and v then parts[#parts + 1] = _("前光") .. " " .. tostring(v) end
+        if ok and v then
+            parts[#parts + 1] = qaFill(qaStatusFormat("frontlight", _("前光") .. " {value}"), { value = v })
+        end
     end
     if on("warmth") and Device:hasNaturalLight() then
         local ok, v = pcall(function()
             local p = Device:getPowerDevice()
             return p:toNativeWarmth(p:frontlightWarmth())
         end)
-        if ok and v then parts[#parts + 1] = _("色温") .. " " .. tostring(v) end
+        if ok and v then
+            parts[#parts + 1] = qaFill(qaStatusFormat("warmth", _("色温") .. " {value}"), { value = v })
+        end
     end
     if #parts == 0 then return "" end
     return BD.wrap(table.concat(parts, "  "))
@@ -4570,6 +4653,8 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
+
 
 
 
