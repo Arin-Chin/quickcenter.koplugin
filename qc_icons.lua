@@ -370,9 +370,16 @@ end
 -- ============================================================
 local function scanAllIconDirs(mode)
     local all_files, seen = {}, {}
-    local dirs_to_scan = (mode == "system")
-        and { "resources/icons/mdlight" }
-        or { getIconsDir(), "resources/icons/mdlight", "resources/icons", "resources" }
+    local dirs_to_scan
+    if mode == "system" then
+        dirs_to_scan = { "resources/icons/mdlight" }
+    elseif mode == "replacement" then
+        -- 替换系统图标时的候选库：快捷中心图标库（用户图标 + 通用内置图标），
+        -- 排除系统图标目录 mdlight，避免与待替换项重名混淆
+        dirs_to_scan = { getIconsDir(), "resources/icons", "resources" }
+    else
+        dirs_to_scan = { getIconsDir(), "resources/icons/mdlight", "resources/icons", "resources" }
+    end
     for _i, dir in ipairs(dirs_to_scan) do
         if lfs.attributes(dir, "mode") == "directory" then
             for file in lfs.dir(dir) do
@@ -394,6 +401,9 @@ local function scanAllIconDirs(mode)
                 end
             end
         end
+    end
+    if mode == "replacement" and #all_files == 0 then
+        return scanAllIconDirs("system") -- 兜底：库为空时仍可浏览系统图标
     end
     return all_files
 end
@@ -427,7 +437,7 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
     local sw, sh = Screen:getWidth(), Screen:getHeight()
     local pad = Screen:scaleBySize(24)
     local brd = Screen:scaleBySize(1)
-    local cache_key = (filter or "all") .. "_" .. (mode or "normal")
+    local cache_key = (filter or "all") .. "_" .. (mode or parent_mode or "normal")
     local use_cache = picker_cache[cache_key] ~= nil
 
     local icons_list, page_widgets, total_pages
@@ -565,7 +575,7 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
     if mode == "system" then temp_overrides = getSystemTempOverrides() end
 
     local cache_valid = false
-    if use_cache and mode ~= "system" then
+    if use_cache and mode ~= "system" and parent_mode ~= "system" then
         local cached = picker_cache[cache_key]
         -- 校验缓存完整性：尺寸一致且 icons_list 存在（防缓存结构变化导致 nil）
         if cached.sw == sw and cached.sh == sh and cached.icons_list then
@@ -579,7 +589,7 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
     end
 
     if not cache_valid then
-        if use_cache and mode ~= "system" and picker_cache[cache_key].icons_list then
+        if use_cache and mode ~= "system" and parent_mode ~= "system" and picker_cache[cache_key].icons_list then
             icons_list = picker_cache[cache_key].icons_list
         else
             icons_list = {}
@@ -589,7 +599,14 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
                 end
             end
             if not filter or filter == "file" then
-                local file_icons = (mode == "system") and scanAllIconDirs("system") or getFileIcons()
+                local file_icons
+                if mode == "system" then
+                    file_icons = scanAllIconDirs("system")
+                elseif parent_mode == "system" then
+                    file_icons = scanAllIconDirs("replacement")
+                else
+                    file_icons = getFileIcons()
+                end
                 for _i, file in ipairs(file_icons) do
                     local item = { type = "file", path = file.path, name = file.name, display_name = file.display_name, value = file.path }
                     if mode == "system" then
@@ -624,7 +641,7 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
         frame_x = math.floor((sw - frame_w) / 2)
         frame_y = math.max(0, math.floor((sh - frame_h) / 2))
         rebuildPicker()
-        if mode ~= "system" then
+        if mode ~= "system" and parent_mode ~= "system" then
             picker_cache[cache_key] = {
                 icons_list = icons_list,
                 page_widgets = page_widgets,
@@ -984,6 +1001,7 @@ local function showIconPicker(on_select, saved_icon, filter, mode, parent_mode)
         local content_x, content_y = frame_x + pad, frame_y + pad
         local title_text
         if mode == "system" then title_text = _("系统图标预览")
+        elseif parent_mode == "system" then title_text = _("选择替换图标")
         elseif filter == "file" then title_text = _("选择图标文件")
         else title_text = _("选择图标") end
         if filter_keyword ~= "" then title_text = title_text .. " [" .. _("筛选") .. ": \"" .. filter_keyword .. "\"]" end
@@ -1031,4 +1049,7 @@ return {
     resetSystemTempOverrides = resetSystemTempOverrides,
     showIconPicker = showIconPicker,
 }
+
+
+
 
