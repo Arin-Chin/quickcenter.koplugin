@@ -4,7 +4,7 @@
 --
 -- 作者 Author : ArinChin
 -- 许可证 License : AGPL-3.0（与 KOReader 一致）
--- 版本 Version : 1.0.0（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
+-- 版本 Version : 1.1.0（插件形态；配置 schema 仍为原补丁 version = 1，向后兼容）
 --
 -- 安装：把整个 quickcenter.koplugin/ 目录放入 koreader/plugins/，在「工具 → 插件管理」
 --       中启用（默认启用）后重启 KOReader。
@@ -4670,6 +4670,7 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
 
 
 
