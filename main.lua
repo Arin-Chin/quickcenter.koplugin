@@ -3476,11 +3476,28 @@ function QC.showSettingsMenu(touch_menu)
                     },
                 },
                 {
-                    text = _("滑块样式"),
+                    text = _("前光色温滑块"),
                     sub_item_table = function()
                         return {
-                            { text = _("线条"), radio = true, checked_func = function() return getSliderStyle() == "line" end, callback = function() setString("qa_slider_style", "line") end },
-                            { text = _("分段按钮"), radio = true, checked_func = function() return getSliderStyle() == "segment" end, callback = function() setString("qa_slider_style", "segment") end },
+                            {
+                                text = function() return (showFrontlight() and "✓ " or "  ") .. _("启用/关闭") .. " " .. _("前光滑块") end,
+                                enabled = Device:hasFrontlight(),
+                                callback = function()
+                                    setBool("qa_frontlight", not showFrontlight())
+                                    refreshQuickPanel(touch_menu)
+                                end,
+                            },
+                            {
+                                text = function() return (showWarmth() and "✓ " or "  ") .. _("启用/关闭") .. " " .. _("色温滑块") end,
+                                enabled = Device:hasNaturalLight(),
+                                callback = function()
+                                    setBool("qa_warmth", not showWarmth())
+                                    refreshQuickPanel(touch_menu)
+                                end,
+                            },
+                            { text = "----------------------------", enabled = false },
+                            { text = _("滑块样式：线条"), radio = true, checked_func = function() return getSliderStyle() == "line" end, callback = function() setString("qa_slider_style", "line") end },
+                            { text = _("滑块样式：分段"), radio = true, checked_func = function() return getSliderStyle() == "segment" end, callback = function() setString("qa_slider_style", "segment") end },
                         }
                     end,
                 },
@@ -4653,6 +4670,7 @@ end
 logger.info("[QuickActions] 插件加载完成")
 
 return QuickCenter
+
 
 
 

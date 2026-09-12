@@ -86,13 +86,13 @@ Reader), plus everything about its buttons.
 | **Interface filter** | Show / hide actions per context: Filemanager / Reader / Common |
 | **Button shape** | Round / Rounded square / Bare |
 | **Button background** | Transparent / Solid / Light gray |
-| **Slider style** | Line / Segmented |
+| **Frontlight / warmth sliders** | Enable / disable each slider (device-dependent); slider style: Line / Segmented |
 | **Button size** | 60% ~ 150% (step 5%, default 100%) |
 | **Label size** | 50% ~ 200% (step 10%, default 90%) |
 | **Show labels** | Toggle |
 | **Hold behaviors** | Hold a button → edit · hold the panel → open settings |
 | **Status bar** | Bottom-right status bar of the Control Center panel: enable/disable and pick items (time / date / battery / Wi-Fi / frontlight / warmth); long-press an item to edit its format (strftime for time/date, placeholders such as `{value}`, `{level}`, `{symbol}`, `{on}`, `{off}`) |
-| **Frontlight / warmth sliders** | With optional value display and Min / Max shortcuts (requires device support) |
+| **Slider value display** | Optional value display and Min / Max shortcuts (requires device support) |
 
 <img src="pictures/02-control-center.png" alt="Control Center panel" width="200"  style="display: block; margin: 0 auto;"  />
 
